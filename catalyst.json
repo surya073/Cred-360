@@ -1,0 +1,15 @@
+{
+  "functions": {
+    "targets": [
+      "cred_360_function",
+      "cred_360_people_function",
+      "cred_360_extras_function"
+    ],
+    "ignore": [],
+    "source": "functions"
+  },
+  "client": {
+    "source": "cred-360-client",
+    "plugin": "zcatalyst-cli-plugin-react"
+  }
+}

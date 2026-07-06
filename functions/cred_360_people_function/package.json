@@ -1,0 +1,10 @@
+{
+	"name": "cred_360_people_function",
+	"version": "1.0.0",
+	"main": "index.js",
+	"author": "",
+	"dependencies": {
+		"express": "^5.2.1",
+		"zcatalyst-sdk-node": "^3.4.0"
+	}
+}

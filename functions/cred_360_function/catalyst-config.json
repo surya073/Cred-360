@@ -1,0 +1,13 @@
+{
+	"deployment": {
+		"name": "cred_360_function",
+		"stack": "node18",
+		"type": "advancedio",
+		"env_variables": {
+			"ENCRYPTION_KEY": "02322a3af36cc49a12cf4fed6a9a2b339c6fc6295d171e2fd88deb618b6546d7"
+		}
+	},
+	"execution": {
+		"main": "index.js"
+	}
+}
