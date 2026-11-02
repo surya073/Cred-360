@@ -1,0 +1,555 @@
+/* ════════════════════════════════════════════
+   CRED 360 — Design Tokens  |  Premium Edition
+════════════════════════════════════════════ */
+
+:root {
+  /* ── Accent ── */
+  --primary:       #7c3aed;
+  --primary-dark:  #6d28d9;
+  --primary-light: #ede9fe;
+  --primary-rgb:   124 58 237;
+
+  /* ── Light theme ── */
+  --bg-primary:       #ffffff;
+  --bg-primary-rgb:   255 255 255;
+  --bg-secondary:     #f4f6fb;
+  --bg-tertiary:      #eaeff8;
+
+  --text-primary:   #0a0f1e;
+  --text-secondary: #3a4a66;
+  --text-muted:     #8096b8;
+
+  --border:         #dce6f5;
+  --border-hover:   #b8ccee;
+  --border-strong:  #b0c4de;
+
+  /* ── Semantic ── */
+  --success:    #16a34a;
+  --success-bg: #f0fdf4;
+  --danger:     #dc2626;
+  --danger-bg:  #fef2f2;
+  --warning:    #d97706;
+  --warning-bg: #fffbeb;
+  --info:       #0284c7;
+  --info-bg:    #f0f9ff;
+
+  /* ── Layout ── */
+  --sidebar-width: 240px;
+  --navbar-height: 60px;
+
+  /* ── Shape ── */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* ── Elevation ── */
+  --shadow-xs: 0 1px 2px  rgba(10, 20, 60, 0.05);
+  --shadow-sm: 0 1px 4px  rgba(10, 20, 60, 0.07);
+  --shadow-md: 0 4px 16px rgba(10, 20, 60, 0.10);
+  --shadow-lg: 0 8px 32px rgba(10, 20, 60, 0.14);
+  --shadow-xl: 0 16px 56px rgba(10, 20, 60, 0.16);
+
+  /* ── Typography ── */
+  --font: 'Google Sans Flex', 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* ── Motion ── */
+  --transition:      all 0.2s ease;
+  --transition-fast: all 0.14s ease;
+  --transition-slow: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Glow (primary accent) ── */
+  --glow-primary: 0 0 0 3px rgba(124, 58, 237, 0.15);
+  --glow-danger:  0 0 0 3px rgba(220, 38, 38, 0.15);
+
+  --card-bg: var(--bg-primary);
+  --shadow-card: var(--shadow-sm);
+}
+
+/* ════════════════════════════════════════════
+   OLED Dark — true black, velvet depth
+════════════════════════════════════════════ */
+[data-theme="dark"] {
+
+  --card-bg: var(--bg-secondary);
+  --shadow-card: var(--shadow-md);
+
+  --primary:       #a78bfa;
+  --primary-dark:  #7c3aed;
+  --primary-light: #1e0a45;
+  --primary-rgb:   167 139 250;
+
+  --bg-primary:       #080808;
+  --bg-primary-rgb:   8 8 8;
+  --bg-secondary:     #101010;
+  --bg-tertiary:      #181818;
+
+  --text-primary:   #f0f4ff;
+  --text-secondary: #7e92b4;
+  --text-muted:     #3a4d6a;
+
+  --border:         #1c1c1c;
+  --border-hover:   #2a2a2a;
+  --border-strong:  #2e2e2e;
+
+  --success-bg: #031a0d;
+  --danger-bg:  #1a0404;
+  --warning-bg: #1a0e00;
+  --info-bg:    #020c1a;
+
+  --shadow-xs: 0 1px 2px  rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 4px  rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.7);
+  --shadow-xl: 0 16px 56px rgba(0, 0, 0, 0.8);
+}
+
+/* ════════════════════════════════════════════
+   Base Reset
+════════════════════════════════════════════ */
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  overflow-x: hidden;
+  max-width: 100vw;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  line-height: 1.5;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: var(--font);
+}
+
+input, textarea, select {
+  font-family: var(--font);
+}
+
+/* Focus ring — accessible + branded */
+:focus-visible {
+  outline: none;
+}
+
+
+/* Scrollbar — thin, themed */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar       { width: 5px; height: 5px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 10px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ════════════════════════════════════════════
+   Preloader
+════════════════════════════════════════════ */
+
+.preloader {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  gap: 10px;
+}
+
+.preloader-logo {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  margin-bottom: 6px;
+  animation: logoFloat 2.8s ease-in-out infinite;
+  filter: drop-shadow(0 8px 24px rgba(124, 58, 237, 0.35));
+}
+
+.preloader-brand {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: 5px;
+  text-transform: uppercase;
+}
+
+.preloader-sub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-bottom: 28px;
+  letter-spacing: 0.3px;
+}
+
+.preloader-bar-wrap {
+  width: 148px;
+  height: 3px;
+  background: var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.preloader-bar {
+  height: 100%;
+  width: 38%;
+  background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+  border-radius: 10px;
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+.preloader-text {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 10px;
+  letter-spacing: 0.5px;
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0);   }
+  50%       { transform: translateY(-7px); }
+}
+
+@keyframes slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(360%); }
+}
+
+/* ════════════════════════════════════════════
+   Tooltip
+════════════════════════════════════════════ */
+
+.app-tooltip {
+  position: fixed;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  padding: 6px 13px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.18),
+    0 2px 6px  rgba(0, 0, 0, 0.08);
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.app-tooltip-bottom {
+  transform: translateX(-50%);
+  animation: tooltipInBottom 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.app-tooltip-bottom::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: var(--text-primary);
+}
+
+.app-tooltip-right {
+  transform: translateY(-50%);
+  animation: tooltipInRight 0.16s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.app-tooltip-right::before {
+  content: '';
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-right-color: var(--text-primary);
+}
+
+@keyframes tooltipInBottom {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(0.93); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0)     scale(1);    }
+}
+
+@keyframes tooltipInRight {
+  from { opacity: 0; transform: translateY(-50%) translateX(-6px) scale(0.93); }
+  to   { opacity: 1; transform: translateY(-50%) translateX(0)     scale(1);    }
+}
+
+/* ════════════════════════════════════════════
+   Selection color
+════════════════════════════════════════════ */
+
+::selection {
+  background: rgba(124, 58, 237, 0.2);
+  color: var(--text-primary);
+}
+
+/* ════════════════════════════════════════════════════════════
+   THEME STYLE VARIANTS
+   Set via document.documentElement.setAttribute('data-style', …)
+   'modern' is the default look above and needs no overrides.
+════════════════════════════════════════════════════════════ */
+
+/* ── Classic — crisp corners, structured, quietly formal ── */
+[data-style="classic"] {
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+
+  --shadow-xs: 0 1px 1px rgba(10, 20, 60, 0.06);
+  --shadow-sm: 0 1px 2px rgba(10, 20, 60, 0.08);
+  --shadow-md: 0 2px 6px rgba(10, 20, 60, 0.08);
+  --shadow-lg: 0 4px 14px rgba(10, 20, 60, 0.10);
+  --shadow-xl: 0 8px 24px rgba(10, 20, 60, 0.12);
+
+  --border-strong: #94a8c8;
+  --transition-slow: all 0.2s ease;
+}
+
+[data-style="classic"] .card,
+[data-style="classic"] .card-flat,
+[data-style="classic"] .card-glass,
+[data-style="classic"] .settings-sidebar,
+[data-style="classic"] .theme-option {
+  border-width: 1.5px;
+}
+
+[data-style="classic"] .btn {
+  letter-spacing: 0.3px;
+}
+
+[data-style="classic"] .page-title {
+  letter-spacing: -0.1px;
+}
+
+/* ── Elegant — generous curvature, hushed depth, airy ── */
+[data-style="elegant"] {
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+
+  --shadow-xs: 0 2px 8px  rgba(10, 20, 60, 0.04);
+  --shadow-sm: 0 4px 16px rgba(10, 20, 60, 0.05);
+  --shadow-md: 0 10px 32px rgba(10, 20, 60, 0.07);
+  --shadow-lg: 0 16px 48px rgba(10, 20, 60, 0.09);
+  --shadow-xl: 0 24px 64px rgba(10, 20, 60, 0.11);
+
+  --transition-slow: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-style="elegant"] .page-title {
+  letter-spacing: -0.3px;
+  font-weight: 600;
+}
+
+[data-style="elegant"] .card:hover,
+[data-style="elegant"] .card-flat:hover {
+  transform: translateY(-2px);
+}
+
+/* ── Minimal — flat, quiet, no ornament ── */
+[data-style="minimal"] {
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+}
+
+[data-style="minimal"] .card,
+[data-style="minimal"] .card-flat {
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+
+[data-style="minimal"] .card:hover {
+  box-shadow: none;
+  border-color: var(--border-strong);
+}
+
+[data-style="minimal"] .btn-primary,
+[data-style="minimal"] .btn-danger,
+[data-style="minimal"] .navbar-action-btn,
+[data-style="minimal"] .user-avatar {
+  box-shadow: none;
+}
+
+.btn-primary:active,
+.btn-danger:active,
+.navbar-action-btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+/* ── Dark-mode adjustments so shadows still read at true black ── */
+[data-theme="dark"][data-style="classic"] {
+  --shadow-xs: 0 1px 2px  rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px  rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px  rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 8px 28px rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="dark"][data-style="elegant"] {
+  --shadow-xs: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 4px 20px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 10px 36px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 52px rgba(0, 0, 0, 0.65);
+  --shadow-xl: 0 24px 70px rgba(0, 0, 0, 0.75);
+}
+
+/* ════════════════════════════════════════════════════════════
+   BACKGROUND FEEL — ambient page gradients
+   Set via document.documentElement.setAttribute('data-bg-feel', …)
+   Targets .app-container (not body) since app-container's opaque
+   background-color would otherwise hide any gradient on body.
+   'plain' is the default and needs no override.
+════════════════════════════════════════════════════════════ */
+
+.app-container {
+  transition: background 0.5s ease;
+}
+
+/* ── Sunset ── */
+[data-bg-feel="sunset"] .app-container {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(255,159,89,0.25), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(132,94,194,0.25), transparent 50%),
+    linear-gradient(160deg, #fff3e6 0%, #ffe0d6 35%, #ffd3e0 70%, #f0e3ff 100%);
+}
+[data-theme="dark"][data-bg-feel="sunset"] .app-container {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(255,138,89,0.18), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(132,94,194,0.22), transparent 50%),
+    linear-gradient(160deg, #1a0f1f 0%, #2c1233 35%, #3a1740 70%, #150a1c 100%);
+}
+
+/* ── Midnight ── */
+[data-bg-feel="midnight"] .app-container {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(124,58,237,0.10), transparent 45%),
+    linear-gradient(160deg, #eef0fb 0%, #e2e5f7 100%);
+}
+[data-theme="dark"][data-bg-feel="midnight"] .app-container {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(124,58,237,0.20), transparent 45%),
+    radial-gradient(circle at 85% 90%, rgba(48,43,99,0.35), transparent 50%),
+    linear-gradient(160deg, #05050a 0%, #0f0c29 45%, #16132e 100%);
+}
+
+/* ── Ocean ── */
+[data-bg-feel="ocean"] .app-container {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(44,83,100,0.12), transparent 45%),
+    linear-gradient(160deg, #eaf6f6 0%, #dcecf0 100%);
+}
+[data-theme="dark"][data-bg-feel="ocean"] .app-container {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(32,58,67,0.4), transparent 45%),
+    radial-gradient(circle at 90% 100%, rgba(15,32,39,0.6), transparent 55%),
+    linear-gradient(160deg, #04080a 0%, #0f2027 45%, #142f36 100%);
+}
+
+/* ── Aurora ── */
+[data-bg-feel="aurora"] .app-container {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(0,198,167,0.14), transparent 45%),
+    radial-gradient(circle at 90% 30%, rgba(124,58,237,0.10), transparent 50%),
+    linear-gradient(160deg, #eefaf7 0%, #ece5fb 100%);
+}
+[data-theme="dark"][data-bg-feel="aurora"] .app-container {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(0,198,167,0.22), transparent 45%),
+    radial-gradient(circle at 90% 30%, rgba(124,58,237,0.22), transparent 50%),
+    linear-gradient(160deg, #030807 0%, #0c1f1c 40%, #150a2e 100%);
+}
+
+/* ── Forest ── */
+[data-bg-feel="forest"] .app-container {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(45,106,79,0.14), transparent 45%),
+    linear-gradient(160deg, #eef7f1 0%, #e2efe6 100%);
+}
+[data-theme="dark"][data-bg-feel="forest"] .app-container {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(45,106,79,0.25), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(15,61,46,0.5), transparent 55%),
+    linear-gradient(160deg, #030905 0%, #0d2118 45%, #10281e 100%);
+}
+
+
+
+
+/* enhanced css */
+
+/* ============================================================
+   PAGE TRANSITION
+   ============================================================ */
+
+.page-enter {
+  animation: pageEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   TOP PROGRESS BAR
+   ============================================================ */
+
+.top-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2.5px;
+  background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+  z-index: 9998;
+  box-shadow: 0 0 8px rgba(var(--primary-rgb), 0.6);
+  animation: topProgress 0.9s ease-in-out infinite;
+}
+
+@keyframes topProgress {
+  0%   { width: 0%;  left: 0%; }
+  50%  { width: 60%; left: 20%; }
+  100% { width: 0%;  left: 100%; }
+}
+

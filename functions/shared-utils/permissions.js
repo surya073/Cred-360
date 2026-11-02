@@ -1,3 +1,5 @@
+'use strict';
+
 function permList(share) {
   return (share.permissions || '').split(',').map(p => p.trim()).filter(Boolean);
 }
@@ -91,7 +93,6 @@ async function userCanOnFolder(catalystApp, user, folderRow, permission) {
   return false;
 }
 
-
 async function validateExternalShare(catalystApp, token, passphrase) {
   const rows = await catalystApp.zcql().executeZCQLQuery(
     `SELECT * FROM PasswordShares WHERE token = '${token}'`
@@ -102,56 +103,6 @@ async function validateExternalShare(catalystApp, token, passphrase) {
   if (share.passphrase !== passphrase) return { error: 'Incorrect passphrase', status: 401 };
   return { share };
 }
-
-
-// external user helper
-function extractDomain(email) {
-  const parts = (email || '').split('@');
-  return parts.length === 2 ? parts[1].toLowerCase() : '';
-}
-
-function upsertExternalUser(catalystApp, rawEmail, sharedByUserId) {
-  const email = (rawEmail || '').trim().toLowerCase();
-  if (!email) return;
-
-  const zcql  = catalystApp.zcql();
-  const table = catalystApp.datastore().table('ExternalUsers');
-
-  zcql.executeZCQLQuery(`SELECT ROWID FROM ExternalUsers WHERE email = '${email}'`)
-    .catch(() => [])
-    .then(async existing => {
-      if (existing.length > 0) {
-        const row = existing[0].ExternalUsers || existing[0];
-        return table.updateRow({ ROWID: row.ROWID, last_shared_time: now() });
-      }
-      return table.insertRow({
-        name:             '',
-        email,
-        domain:           extractDomain(email),
-        company:          '',
-        status:           'active',
-        first_shared_time: now(),
-        last_shared_time:  now(),
-        created_by:       String(sharedByUserId),
-        notes:            '',
-      });
-    })
-    .catch(e => {
-      if (e.message?.toLowerCase().includes('duplicate') ||
-          e.message?.toLowerCase().includes('unique')) {
-        zcql.executeZCQLQuery(`SELECT ROWID FROM ExternalUsers WHERE email = '${email}'`)
-          .then(rows => {
-            if (rows.length) {
-              const row = rows[0].ExternalUsers || rows[0];
-              table.updateRow({ ROWID: row.ROWID, last_shared_time: now() }).catch(() => {});
-            }
-          }).catch(() => {});
-      } else {
-        console.log('ExternalUsers upsert error:', e.message);
-      }
-    });
-}
-
 
 // ── Simple in-memory rate limiter ─────────────────────────────────────────
 // Tracks failed passphrase attempts per token
@@ -193,8 +144,9 @@ function recordFailedAttempt(token) {
   }
 
   passphraseAttempts.set(token, entry);
-  return Math.max(0, 5 - entry.count);   // ← add this line
+  return Math.max(0, 5 - entry.count);
 }
+
 function clearAttempts(token) {
   passphraseAttempts.delete(token);
 }
@@ -208,9 +160,6 @@ setInterval(() => {
     }
   }
 }, 30 * 60 * 1000);
-
-
-// (paste them here, unchanged)
 
 module.exports = {
   permList, shareIsActive, getUserTeamIds, getDescendantFolderIds,

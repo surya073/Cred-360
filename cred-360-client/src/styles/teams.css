@@ -1,0 +1,439 @@
+/* ── Teams page ─────────────────────────────────────────────────────────── */
+
+/* Avatar (used by UserAvatar component everywhere: cards, tables, popups) */
+.user-avatar {
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 2px solid var(--bg-primary);
+}
+
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.user-avatar-fallback {
+  background: var(--primary-light);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+/* Shared By cell (Passwords tab table) */
+.shared-by-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shared-by-name {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* Shared by row on folder cards */
+.folder-shared-by {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.folder-shared-by-name {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* ── Sort dropdown ──────────────────────────────────────────────────────── */
+
+.sort-dropdown {
+  position: relative;
+  min-width: 190px;
+}
+
+.sort-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.sort-dropdown-trigger:hover {
+  border-color: var(--primary);
+}
+
+.sort-dropdown-trigger.open {
+  border-color: var(--primary);
+  background: var(--bg-tertiary);
+}
+
+.sort-dropdown-trigger-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sort-dropdown-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+}
+
+.sort-dropdown-chevron.open {
+  transform: rotate(180deg);
+}
+
+.sort-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 200px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+  padding: 6px;
+  z-index: 40;
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.sort-dropdown-menu.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.sort-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sort-dropdown-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.sort-dropdown-item.active {
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── Team active/inactive toggle on card ───────────────────────────────── */
+
+.team-card-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.folder-card.team-card-inactive {
+  opacity: 0.55;
+}
+
+.team-inactive-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+}
+
+/* ── Info popup (Team created on / created by) ─────────────────────────── */
+
+.info-popup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.info-popup-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.info-popup-value {
+  font-size: 13px;
+}
+
+.info-popup-creator-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Member permission chips (Members tab / Add-Member modal) ─────────── */
+
+.perm-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.perm-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.12s ease;
+}
+
+.perm-chip:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.perm-chip.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.perm-chip:disabled {
+  cursor: default;
+}
+
+/* ── Tagify-style multi-user select (Add Member modal) ─────────────────── */
+
+.tag-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  min-height: 44px;
+}
+
+.tag-select-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 12.5px;
+}
+
+.tag-select-chip-remove {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--primary);
+  opacity: 0.7;
+}
+
+.tag-select-chip-remove:hover {
+  opacity: 1;
+}
+
+.tag-select-input {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.tag-select-suggestions {
+  margin-top: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.tag-select-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.tag-select-suggestion-item:hover {
+  background: var(--bg-tertiary);
+}
+
+/* ════════════════════════════════════════════════════════════
+   BACKGROUND FEEL — ambient page gradients
+   Set via document.documentElement.setAttribute('data-bg-feel', …)
+   'plain' is the default and needs no override.
+════════════════════════════════════════════════════════════ */
+
+body {
+  background-attachment: fixed;
+  transition: background 0.5s ease;
+}
+
+/* ── Sunset ── */
+[data-bg-feel="sunset"] body {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(255,159,89,0.25), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(132,94,194,0.25), transparent 50%),
+    linear-gradient(160deg, #fff3e6 0%, #ffe0d6 35%, #ffd3e0 70%, #f0e3ff 100%);
+}
+[data-theme="dark"][data-bg-feel="sunset"] body {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(255,138,89,0.18), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(132,94,194,0.22), transparent 50%),
+    linear-gradient(160deg, #1a0f1f 0%, #2c1233 35%, #3a1740 70%, #150a1c 100%);
+}
+
+/* ── Midnight ── */
+[data-bg-feel="midnight"] body {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(124,58,237,0.10), transparent 45%),
+    linear-gradient(160deg, #eef0fb 0%, #e2e5f7 100%);
+}
+[data-theme="dark"][data-bg-feel="midnight"] body {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(124,58,237,0.20), transparent 45%),
+    radial-gradient(circle at 85% 90%, rgba(48,43,99,0.35), transparent 50%),
+    linear-gradient(160deg, #05050a 0%, #0f0c29 45%, #16132e 100%);
+}
+
+/* ── Ocean ── */
+[data-bg-feel="ocean"] body {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(44,83,100,0.12), transparent 45%),
+    linear-gradient(160deg, #eaf6f6 0%, #dcecf0 100%);
+}
+[data-theme="dark"][data-bg-feel="ocean"] body {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(32,58,67,0.4), transparent 45%),
+    radial-gradient(circle at 90% 100%, rgba(15,32,39,0.6), transparent 55%),
+    linear-gradient(160deg, #04080a 0%, #0f2027 45%, #142f36 100%);
+}
+
+/* ── Aurora ── */
+[data-bg-feel="aurora"] body {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(0,198,167,0.14), transparent 45%),
+    radial-gradient(circle at 90% 30%, rgba(124,58,237,0.10), transparent 50%),
+    linear-gradient(160deg, #eefaf7 0%, #ece5fb 100%);
+}
+[data-theme="dark"][data-bg-feel="aurora"] body {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(0,198,167,0.22), transparent 45%),
+    radial-gradient(circle at 90% 30%, rgba(124,58,237,0.22), transparent 50%),
+    linear-gradient(160deg, #030807 0%, #0c1f1c 40%, #150a2e 100%);
+}
+
+/* ── Forest ── */
+[data-bg-feel="forest"] body {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(45,106,79,0.14), transparent 45%),
+    linear-gradient(160deg, #eef7f1 0%, #e2efe6 100%);
+}
+[data-theme="dark"][data-bg-feel="forest"] body {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(45,106,79,0.25), transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(15,61,46,0.5), transparent 55%),
+    linear-gradient(160deg, #030905 0%, #0d2118 45%, #10281e 100%);
+}
+
+/* ════════════════════════════════════════════
+   Background Feel picker grid (Settings page)
+════════════════════════════════════════════ */
+
+.bgfeel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.bgfeel-card {
+  position: relative;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.bgfeel-card:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.bgfeel-card.active {
+  border-color: var(--primary);
+  box-shadow: var(--glow-primary);
+}
+
+.bgfeel-card-preview {
+  height: 46px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+}
+
+.bgfeel-card-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bgfeel-card-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.bgfeel-card-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}

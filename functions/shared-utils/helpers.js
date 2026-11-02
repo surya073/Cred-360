@@ -1,3 +1,5 @@
+'use strict';
+
 async function getCurrentUser(req, catalystApp) {
   try { return await catalystApp.userManagement().getCurrentUser(); }
   catch { return null; }
@@ -7,7 +9,6 @@ function now() {
   return new Date().toISOString().slice(0, 19).replace('T', ' ');
 }
 
-// Fire-and-forget activity log — never blocks the response
 function logActivity(catalystApp, fields) {
   catalystApp.datastore().table('ActivityLogs')
     .insertRow({ ...fields, created_time: now() })
@@ -28,7 +29,6 @@ function checkStrength(password) {
   return 'strong';
 }
 
-// Build a map from an array: mapBy(rows, r => r.ROWID)
 function mapBy(arr, keyFn) {
   const m = {};
   arr.forEach(item => { m[String(keyFn(item))] = item; });
@@ -39,8 +39,6 @@ function escapeLike(str) {
   return (str || '').replace(/'/g, "''");
 }
 
-
-// external user helper
 function extractDomain(email) {
   const parts = (email || '').split('@');
   return parts.length === 2 ? parts[1].toLowerCase() : '';
@@ -61,15 +59,9 @@ function upsertExternalUser(catalystApp, rawEmail, sharedByUserId) {
         return table.updateRow({ ROWID: row.ROWID, last_shared_time: now() });
       }
       return table.insertRow({
-        name:             '',
-        email,
-        domain:           extractDomain(email),
-        company:          '',
-        status:           'active',
-        first_shared_time: now(),
-        last_shared_time:  now(),
-        created_by:       String(sharedByUserId),
-        notes:            '',
+        name: '', email, domain: extractDomain(email), company: '',
+        status: 'active', first_shared_time: now(), last_shared_time: now(),
+        created_by: String(sharedByUserId), notes: '',
       });
     })
     .catch(e => {
@@ -98,9 +90,30 @@ async function isExternalUserBlocked(catalystApp, rawEmail) {
   return (rows[0].ExternalUsers || rows[0]).status === 'blocked';
 }
 
-// (paste the 9 functions here, unchanged)
+async function pushNotification(catalystApp, {
+  event_type, recipient_type, recipient_id, ref_id = '',
+  ref_name = '', actor_id = '', actor_name = '', details = '', title = ''
+}) {
+  try {
+    await catalystApp.datastore().table('NotificationEvents').insertRow({
+      event_type, recipient_type, recipient_id: String(recipient_id),
+      ref_id: String(ref_id), ref_name, actor_id: String(actor_id),
+      actor_name, details, title, created_time: now(),
+    });
+  } catch (e) {
+    console.log('pushNotification error:', e.message);
+  }
+}
 
 module.exports = {
-  getCurrentUser, now, logActivity, checkStrength, mapBy,
-  escapeLike, extractDomain, upsertExternalUser, isExternalUserBlocked,
+  getCurrentUser,
+  now,
+  logActivity,
+  checkStrength,
+  mapBy,
+  escapeLike,
+  extractDomain,
+  upsertExternalUser,
+  isExternalUserBlocked,
+  pushNotification,
 };

@@ -47,7 +47,7 @@ app.get('/api/external-users', async (req, res) => {
 	});
 
 	// For non-admin: only show emails THEY have shared with
-   const orgView = req.query.view === 'org';
+  const orgView = req.query.view === 'org' && isAdmin; // only admins can request org view
 
 // For admin: if orgView show all, else show only their own (same logic as non-admin)
 const mySharedEmails = new Set();

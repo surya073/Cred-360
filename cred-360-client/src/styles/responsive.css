@@ -1,0 +1,518 @@
+/* ════════════════════════════════════════════
+   TABLET — max 1024px
+════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-width: 220px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .dashboard-charts-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-charts-row2 {
+    grid-template-columns: 1fr;
+  }
+
+  .folders-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .users-stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ════════════════════════════════════════════
+   MOBILE — max 768px
+════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* ── Sidebar: off-canvas drawer ── */
+  .sidebar {
+    transform: translateX(-100%);
+    width: 260px !important;
+    z-index: 300;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Reset collapsed styles on mobile — show full sidebar */
+  .sidebar.collapsed {
+    width: 260px !important;
+  }
+
+  .sidebar.collapsed .sidebar-logo-text {
+    opacity: 1 !important;
+    width: auto !important;
+    pointer-events: auto !important;
+  }
+
+  .sidebar.collapsed .sidebar-section-label {
+    opacity: 1 !important;
+    height: auto !important;
+    padding: 8px 10px 4px !important;
+    overflow: visible !important;
+  }
+
+  .sidebar.collapsed .sidebar-item-label {
+    opacity: 1 !important;
+    width: auto !important;
+  }
+
+  .sidebar.collapsed .sidebar-item {
+    justify-content: flex-start !important;
+    padding: 9px 12px !important;
+  }
+
+  .sidebar.collapsed .sidebar-user-text {
+    opacity: 1 !important;
+    width: auto !important;
+    overflow: visible !important;
+  }
+
+  /* ── Overlay ── */
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 299;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  .sidebar-overlay.visible {
+    display: block;
+  }
+
+  /* ── Navbar ── */
+  .navbar {
+    left: 0 !important;
+    padding: 0 14px;
+  }
+
+  .navbar.sidebar-collapsed {
+    left: 0 !important;
+  }
+
+  /* ── Main wrapper ── */
+  .main-wrapper {
+    margin-left: 0 !important;
+  }
+
+  .main-wrapper.sidebar-collapsed {
+    margin-left: 0 !important;
+  }
+
+  /* ── Main content ── */
+  .main-content {
+    padding: 14px;
+  }
+
+  /* ── Page header ── */
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .flex-between {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 10px;
+  }
+
+  .page-title {
+    font-size: 18px;
+  }
+
+  .page-subtitle {
+    font-size: 13px;
+  }
+
+  /* ── Stats grid ── */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .dashboard-skeleton {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .stat-card {
+    padding: 14px;
+    gap: 10px;
+  }
+
+  .stat-value {
+    font-size: 20px;
+  }
+
+  .stat-icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  /* ── Charts ── */
+  .dashboard-charts-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .dashboard-charts-row2 {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* ── Card ── */
+  .card {
+    padding: 14px;
+  }
+
+  /* ── Table ── */
+  .table-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .search-box {
+    max-width: 100%;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table {
+    min-width: 580px;
+  }
+
+  /* ── Folders grid ── */
+  .folders-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .folder-card {
+    padding: 14px;
+  }
+
+  .folder-card-actions {
+    opacity: 1;
+  }
+
+  /* ── Folders layout ── */
+  .folders-layout {
+    flex-direction: column;
+  }
+
+  .folder-detail-card {
+    width: 100%;
+  }
+
+  /* ── Users stats ── */
+  .users-stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  /* ── Modal: slide from bottom ── */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal {
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .modal-sm {
+    max-width: 100%;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  /* ── Form grid ── */
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .form-full {
+    grid-column: 1;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    font-size: 13px;
+    padding: 7px 14px;
+  }
+
+  /* ── Pagination ── */
+  .pagination {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .page-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  /* ── Toast ── */
+  .toast-container {
+    bottom: 16px;
+    right: 12px;
+    left: 12px;
+    max-width: 100%;
+  }
+
+  /* ── Share tabs ── */
+  .share-type-tabs {
+    gap: 6px;
+  }
+
+  /* ── Dropdown ── */
+  .user-dropdown {
+    right: -10px;
+    width: 200px;
+  }
+}
+
+/* ════════════════════════════════════════════
+   SMALL MOBILE — max 480px
+════════════════════════════════════════════ */
+@media (max-width: 480px) {
+
+  .main-content {
+    padding: 10px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 12px 10px;
+    gap: 8px;
+  }
+
+  .stat-value {
+    font-size: 18px;
+  }
+
+  .stat-label {
+    font-size: 11px;
+  }
+
+  .stat-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .folders-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .folder-card {
+    padding: 12px;
+  }
+
+  .folder-card-name {
+    font-size: 13px;
+  }
+
+  .users-stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .user-stat-card {
+    padding: 12px 10px;
+    gap: 8px;
+  }
+
+  .user-stat-value {
+    font-size: 18px;
+  }
+/* 
+  .navbar-title {
+    display: none;
+  } */
+
+  .page-title {
+    font-size: 16px;
+  }
+
+  .page-subtitle {
+    font-size: 12px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .icon-btn {
+    width: 26px;
+    height: 26px;
+  }
+
+  .modal-header {
+    padding: 14px 16px;
+  }
+
+  .modal-body {
+    padding: 14px 16px;
+  }
+
+  .modal-footer {
+    padding: 12px 16px;
+    gap: 6px;
+  }
+
+  .modal-footer .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .page-btn {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+
+  .badge {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+}
+
+/* ════════════════════════════════════════════
+   EXTRA SMALL — max 360px
+════════════════════════════════════════════ */
+@media (max-width: 360px) {
+  .stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .folders-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .users-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .stat-card {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px;
+  }
+
+ 
+}
+
+
+/* ── Flex-between mobile fix ── */
+@media (max-width: 768px) {
+  .flex-between {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .flex-between > div:last-child {
+    width: 100%;
+  }
+
+  .flex-between .flex {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  /* Table horizontal scroll */
+  .table-wrap {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  .data-table {
+    min-width: 560px;
+    width: 100%;
+  }
+
+  /* Card full width */
+  .card {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  /* Users stats 2 col */
+  .users-stats {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Table toolbar stack */
+  .table-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .search-box {
+    max-width: 100% !important;
+    width: 100%;
+  }
+
+  .result-count {
+    display: none;
+  }
+
+  /* Pagination wrap */
+  .pagination {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+}
+
+/* ── App container fix ── */
+@media (max-width: 768px) {
+  .app-container {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  .main-wrapper {
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  .main-content {
+    overflow-x: hidden;
+    width: 100%;
+  }
+}
