@@ -1,23 +1,14 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import React, { createContext, useContext, useState, useCallback } from 'react';
 
 const ShareNotifContext = createContext({ passwords: 0, folders: 0, refresh: () => {} });
 
 export const ShareNotifProvider = ({ children }) => {
   const [counts, setCounts] = useState({ passwords: 0, folders: 0 });
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await axios.get('/server/cred_360_function/api/shares/unread-counts');
-      if (res.data.success) setCounts(res.data.data);
-    } catch(e) {}
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, 60000); // refresh every 60s
-    return () => clearInterval(interval);
-  }, [refresh]);
+  // The backend route /api/shares/unread-counts is disabled (commented out in cred_360_function),
+  // so calling it only produced a 404 every minute and on every tab switch. Keep the context API
+  // (consumers read passwords/folders/refresh) but make no network calls until the route returns.
+  const refresh = useCallback(async () => { setCounts(c => c); }, []);
 
   return (
     <ShareNotifContext.Provider value={{ ...counts, refresh }}>

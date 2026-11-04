@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="120" viewBox="0 0 1600 120" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#150f2e"/><stop offset="0.55" stop-color="#1c1445"/><stop offset="1" stop-color="#2a1238"/></linearGradient>
+    <radialGradient id="a" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#8b5cf6" stop-opacity="0.55"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/></radialGradient>
+    <radialGradient id="b" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ec4899" stop-opacity="0.5"/><stop offset="1" stop-color="#ec4899" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1600" height="120" fill="url(#g)"/>
+  <ellipse cx="1380" cy="20" rx="300" ry="100" fill="url(#a)"/>
+  <ellipse cx="420" cy="115" rx="360" ry="90" fill="url(#b)"/>
+  <circle cx="1120" cy="60" r="46" fill="none" stroke="#c4b5fd" stroke-opacity="0.35" stroke-width="1.5"/>
+  <circle cx="1120" cy="60" r="78" fill="none" stroke="#c4b5fd" stroke-opacity="0.2" stroke-width="1.5"/>
+  <circle cx="1120" cy="60" r="112" fill="none" stroke="#c4b5fd" stroke-opacity="0.12" stroke-width="1.5"/>
+  <circle cx="760" cy="30" r="5" fill="#ffffff" fill-opacity="0.5"/><circle cx="840" cy="82" r="3" fill="#ffffff" fill-opacity="0.45"/>
+  <circle cx="610" cy="74" r="4" fill="#ffffff" fill-opacity="0.4"/><circle cx="930" cy="26" r="3" fill="#ffffff" fill-opacity="0.45"/>
+  <circle cx="240" cy="38" r="4" fill="#ffffff" fill-opacity="0.4"/><circle cx="1480" cy="88" r="5" fill="#ffffff" fill-opacity="0.4"/>
+  <g fill="none" stroke="#c4b5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.45">
+    <!-- lock -->
+    <g transform="translate(1000 62) rotate(-8)">
+      <rect x="-15" y="-3" width="30" height="24" rx="5"/>
+      <path d="M-9 -3 V-11 a9 9 0 0 1 18 0 V-3"/>
+      <circle cx="0" cy="8" r="2.6"/><path d="M0 10.6 V14"/>
+    </g>
+    <!-- key -->
+    <g transform="translate(1180 60) rotate(-28)">
+      <circle cx="0" cy="0" r="10"/><circle cx="0" cy="0" r="3.2"/>
+      <path d="M10 0 H52 M40 0 V9 M48 0 V7"/>
+    </g>
+    <!-- small lock -->
+    <g transform="translate(1320 34) rotate(10) scale(0.62)">
+      <rect x="-15" y="-3" width="30" height="24" rx="5"/>
+      <path d="M-9 -3 V-11 a9 9 0 0 1 18 0 V-3"/>
+    </g>
+    <!-- small key -->
+    <g transform="translate(900 92) rotate(18) scale(0.6)">
+      <circle cx="0" cy="0" r="10"/><path d="M10 0 H44 M34 0 V8"/>
+    </g>
+  </g>
+</svg>

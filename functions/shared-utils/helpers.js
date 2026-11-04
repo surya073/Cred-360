@@ -1,8 +1,20 @@
 'use strict';
 
+const { ROLE_MAP } = require('./constants');
+
 async function getCurrentUser(req, catalystApp) {
   try { return await catalystApp.userManagement().getCurrentUser(); }
   catch { return null; }
+}
+
+// App-level role ('Admin' | 'Team Lead' | 'Employee' | 'Intern') for a Catalyst user.
+// Catalyst names the admin role "App Administrator"; never compare against 'Admin' directly.
+function appRole(user) {
+  return ROLE_MAP[user?.role_details?.role_name] || 'Employee';
+}
+
+function isAdmin(user) {
+  return appRole(user) === 'Admin';
 }
 
 function now() {
@@ -107,6 +119,8 @@ async function pushNotification(catalystApp, {
 
 module.exports = {
   getCurrentUser,
+  appRole,
+  isAdmin,
   now,
   logActivity,
   checkStrength,

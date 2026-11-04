@@ -1,0 +1,152 @@
+/* Premium finish: offcanvas drawers, Settings (Region tab, responsive tabs). Loaded last. */
+
+/* ── Offcanvas drawers: same banner art as the top bar ───────────────────── */
+.offcanvas-panel, .eu-offcanvas, .ks-oc {
+  background: var(--surface, var(--card-bg));
+}
+.offcanvas-header, .eu-offcanvas-header, .ks-oc-head {
+  background-color: var(--surface-head, var(--card-bg));
+  background-image: url('../assets/navbar-bg-aurora-light.svg');
+  background-size: cover;
+  background-position: right center;
+  background-repeat: no-repeat;
+  border-bottom: 1px solid var(--border);
+  padding: 18px 20px;
+}
+[data-theme="dark"] .offcanvas-header,
+[data-theme="dark"] .eu-offcanvas-header,
+[data-theme="dark"] .ks-oc-head {
+  background-image: url('../assets/navbar-bg-aurora-dark.svg');
+}
+.offcanvas-title, .eu-offcanvas-header h2, .eu-offcanvas-header h3 { font-weight: 650; }
+.offcanvas-close, .eu-offcanvas-close {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+[data-theme="dark"] .offcanvas-close,
+[data-theme="dark"] .eu-offcanvas-close { background: rgba(255, 255, 255, 0.08); }
+/* ── One backdrop for every modal, confirm, search and drawer ─────────────── */
+.modal-overlay, .eu-modal-backdrop, .sa-overlay, .gs-modal-backdrop,
+.offcanvas-backdrop, .eu-offcanvas-backdrop {
+  background: rgba(8, 10, 24, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.eu-offcanvas-backdrop { animation: ks-fade-in 0.3s ease both; }
+@keyframes ks-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── One drawer: slides in from the right, 40% wide, fully opaque ─────────── */
+.offcanvas-panel, .eu-offcanvas, .ks-oc {
+  width: 40vw;
+  min-width: 380px;
+  max-width: 100vw;
+  background: var(--surface, var(--card-bg));
+  opacity: 1;
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 48px rgba(0, 0, 0, 0.28);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+.eu-offcanvas { animation: ks-drawer-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes ks-drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.offcanvas-backdrop { transition: opacity 0.3s ease; z-index: 1000; }
+.offcanvas-panel { z-index: 1001; }
+@media (max-width: 640px) {
+  .offcanvas-panel, .eu-offcanvas, .ks-oc { width: 100vw; min-width: 0; }
+}
+
+/* ── Settings: premium cards + responsive tab bar ────────────────────────── */
+.settings-content .card { overflow: hidden; }
+.settings-content .card-header {
+  background-image: url('../assets/navbar-bg-aurora-light.svg');
+  background-size: cover;
+  background-position: right center;
+  margin: -1px -1px 18px;
+  padding: 16px 20px;
+  border-radius: var(--radius-lg, 14px) var(--radius-lg, 14px) 0 0;
+}
+[data-theme="dark"] .settings-content .card-header {
+  background-image: url('../assets/navbar-bg-aurora-dark.svg');
+}
+
+@media (max-width: 768px) {
+  .settings-layout { flex-direction: column; gap: 14px; }
+  .settings-sidebar {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 6px;
+    padding: 6px;
+    scrollbar-width: none;
+  }
+  .settings-sidebar::-webkit-scrollbar { display: none; }
+  .settings-tab { white-space: nowrap; flex-shrink: 0; padding: 9px 14px; }
+  .settings-content { width: 100%; min-width: 0; }
+  .security-item { flex-wrap: wrap; gap: 10px; }
+}
+
+/* ── Region & Time ───────────────────────────────────────────────────────── */
+.tz-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  border-radius: 14px;
+  color: #fff;
+  background:
+    radial-gradient(240px 120px at 90% 0%, rgba(244, 114, 182, .45), transparent 70%),
+    linear-gradient(120deg, #4c1d95, #6d28d9 60%, #7c3aed);
+  box-shadow: 0 10px 28px rgba(76, 29, 149, .28);
+  flex-wrap: wrap;
+}
+.tz-hero-icon {
+  display: grid; place-items: center; width: 48px; height: 48px;
+  border-radius: 14px; background: rgba(255, 255, 255, .16);
+}
+.tz-hero-body { flex: 1 1 180px; min-width: 0; }
+.tz-hero-label { font-size: 12px; opacity: .8; text-transform: uppercase; letter-spacing: .06em; }
+.tz-hero-zone { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
+.tz-hero-zone span { font-size: 12.5px; font-weight: 500; opacity: .85; margin-left: 6px; }
+.tz-hero-clock { text-align: right; }
+.tz-clock-time { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.tz-clock-date { font-size: 12.5px; opacity: .85; }
+
+.tz-quick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.tz-chip {
+  padding: 8px 14px; font-size: 13px; color: var(--text-primary);
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 999px; cursor: pointer; transition: all .15s;
+}
+.tz-chip:hover { border-color: var(--primary); }
+.tz-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+.tz-list {
+  max-height: 300px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card-bg);
+}
+.tz-group-title {
+  position: sticky; top: 0; z-index: 1;
+  padding: 6px 14px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+  background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+}
+.tz-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; padding: 10px 14px; text-align: left;
+  font-size: 13.5px; color: var(--text-primary);
+  background: transparent; border: 0; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.tz-item:last-child { border-bottom: 0; }
+.tz-item:hover { background: var(--bg-secondary); }
+.tz-item.active { color: var(--primary); font-weight: 600; background: rgba(var(--primary-rgb, 124, 58, 237), .08); }
+.tz-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 13.5px; }
+.tz-note { margin: 14px 0 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+@media (max-width: 520px) {
+  .tz-hero-clock { text-align: left; width: 100%; }
+}

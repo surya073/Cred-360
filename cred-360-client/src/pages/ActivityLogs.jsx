@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import Toast, { useToast } from '../components/Toast';
 import { Confirm, useConfirm } from '../components/Confirm';
 import { useAuth } from '../context/AuthContext';
+import DataTable from '../components/DataTable';
+import { formatDateTime, formatRelative, dayRangeUtc } from '../utils/dateHelper';
 import {
   RiHistoryLine, RiRefreshLine, RiSearchLine,
   RiKeyLine, RiShareLine, RiDeleteBinLine,
@@ -45,18 +47,6 @@ const getActionColor = (action) => {
   if (a.includes('team'))     return { bg: '#f0f9ff', color: '#0284c7' };
   if (a.includes('expiry'))   return { bg: '#fef2f2', color: '#dc2626' };
   return { bg: '#f0f9ff', color: '#0284c7' };
-};
-
-const timeAgo = (dateStr) => {
-  if (!dateStr) return '';
-  const diff = Date.now() - new Date(dateStr.replace(' ', 'T') + 'Z');
-  const mins  = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins < 1)   return 'Just now';
-  if (mins < 60)  return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
 };
 
 const formatDetails = (action, details, userEmail) => {
@@ -130,36 +120,37 @@ const ActivityLogs = () => {
 const { confirmState, confirm, handleCancel, handleConfirm, setLoading: setConfirmLoading } = useConfirm();
   const [activeTab, setActiveTab] = useState('table'); // 'table' | 'analytics'
 
-  const [logs, setLogs]           = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [search, setSearch]       = useState('');
-  const [filter, setFilter]       = useState('all');
-  const [page, setPage]           = useState(1);
-  const [pageSize, setPageSize]   = useState(15);
   const [selectedLog, setSelectedLog] = useState(null); // offcanvas
 
   const [scope, setScope]         = useState('mine'); // 'mine' | 'org'
   const [isAdmin, setIsAdmin]     = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [deleting, setDeleting]   = useState(false);
+  const [reload, setReload]       = useState(0);      // bump to re-query the table
 
   const [analytics, setAnalytics] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
-  const fetchLogs = useCallback(async (scopeParam) => {
-    setLoading(true);
+  // Ajax page loader for <DataTable> — only the visible page is fetched.
+  const fetchPage = useCallback(async ({ page, pageSize, search, from, to, filters }) => {
     try {
-      const res = await axios.get(`${API}/api/activity-logs`, { params: { scope: scopeParam } });
-      if (res.data.success) {
-        setLogs(res.data.data || []);
-        if (typeof res.data.isAdmin === 'boolean') setIsAdmin(res.data.isAdmin);
-      }
-    } catch(e) {
+      const range = dayRangeUtc(from, to);
+      const res = await axios.get(`${API}/api/activity-logs`, {
+        params: {
+          scope, page, limit: pageSize, search,
+          action: filters?.action && filters.action !== 'all' ? filters.action : undefined,
+          from: range.from || undefined, to: range.to || undefined,
+        },
+      });
+      if (!res.data.success) return { rows: [], total: 0 };
+      if (typeof res.data.isAdmin === 'boolean') setIsAdmin(res.data.isAdmin);
+      return { rows: res.data.data || [], total: res.data.total ?? (res.data.data || []).length };
+    } catch (e) {
       toast.error('Failed to load activity logs');
-    } finally {
-      setLoading(false);
+      return { rows: [], total: 0 };
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   const fetchAnalytics = useCallback(async () => {
     setAnalyticsLoading(true);
@@ -176,8 +167,7 @@ const { confirmState, confirm, handleCancel, handleConfirm, setLoading: setConfi
     }
   }, []);
 
-  useEffect(() => { fetchLogs(scope); }, [scope, fetchLogs]);
-  useEffect(() => { setPage(1); setSelectedIds([]); }, [search, filter, pageSize, scope]);
+  useEffect(() => { setSelectedIds([]); }, [scope]);
   useEffect(() => { if (activeTab === 'analytics') fetchAnalytics(); }, [activeTab, fetchAnalytics]);
 
   // Lock body scroll when offcanvas is open
@@ -201,34 +191,52 @@ const { confirmState, confirm, handleCancel, handleConfirm, setLoading: setConfi
     return log.user_email.split('@')[0];
   };
 
-  const filtered = logs
-    .filter(l => {
-      if (filter === 'all') return true;
-      return l.action?.toLowerCase().includes(filter);
-    })
-    .filter(l =>
-      l.action?.toLowerCase().includes(search.toLowerCase()) ||
-      l.user_email?.toLowerCase().includes(search.toLowerCase()) ||
-      l.details?.toLowerCase().includes(search.toLowerCase())
-    );
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize);
-
-  const allOnPageSelected = paginated.length > 0 && paginated.every(l => selectedIds.includes(l.ROWID));
-
-  const toggleSelectAllOnPage = () => {
-    if (allOnPageSelected) {
-      setSelectedIds(prev => prev.filter(id => !paginated.some(l => l.ROWID === id)));
-    } else {
-      setSelectedIds(prev => Array.from(new Set([...prev, ...paginated.map(l => l.ROWID)])));
-    }
-  };
-
-  const toggleSelectOne = (id, e) => {
-    e.stopPropagation();
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
+  const columns = [
+    {
+      key: 'action', label: 'Action',
+      render: (log) => {
+        const color = getActionColor(log.action);
+        return (
+          <div className="flex gap-8" style={{ alignItems: 'center' }}>
+            <div className="pw-icon" style={{ background: color.bg, color: color.color }}>
+              {getActionIcon(log.action)}
+            </div>
+            <span className="td-bold">{log.action}</span>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'details', label: 'Details',
+      render: (log) => (
+        <span className="td-muted" style={{
+          display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260,
+        }}>
+          {formatDetails(log.action, log.details, log.user_email)}
+        </span>
+      ),
+    },
+    {
+      key: 'user_email', label: 'User',
+      render: (log) => {
+        const display = getUserDisplay(log);
+        if (!display) return <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>External</span>;
+        return display === 'You' ? <span className="badge badge-info">You</span> : <span className="td-muted">{display}</span>;
+      },
+    },
+    {
+      key: 'when', label: 'When',
+      render: (log) => (
+        <span className="badge" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
+          {formatRelative(log.created_time, '')}
+        </span>
+      ),
+    },
+    {
+      key: 'created_time', label: 'Date & Time',
+      render: (log) => <span className="td-muted" style={{ fontSize: 12.5 }}>{formatDateTime(log.created_time)}</span>,
+    },
+  ];
 
 const handleBulkDelete = async () => {
   if (selectedIds.length === 0) return;
@@ -250,7 +258,7 @@ const handleBulkDelete = async () => {
     if (res.data.success) {
       toast.success(`Deleted ${res.data.deleted} log${res.data.deleted > 1 ? 's' : ''}`);
       setSelectedIds([]);
-      fetchLogs(scope);
+      setReload(n => n + 1);
     }
   } catch(e) {
     toast.error(e.response?.data?.error || 'Failed to delete logs');
@@ -258,22 +266,6 @@ const handleBulkDelete = async () => {
     setDeleting(false);
   }
 };
-
-  const renderPageButtons = () => {
-    const buttons = [];
-    for (let i = 1; i <= totalPages; i++) {
-      if (i === 1 || i === totalPages || (i >= page - 1 && i <= page + 1)) {
-        buttons.push(
-          <button key={i} className={`page-btn ${page === i ? 'active' : ''}`} onClick={() => setPage(i)}>
-            {i}
-          </button>
-        );
-      } else if (i === page - 2 || i === page + 2) {
-        buttons.push(<span key={i} style={{ color: 'var(--text-muted)', padding: '0 2px' }}>...</span>);
-      }
-    }
-    return buttons;
-  };
 
   const maxUserCount = analytics?.byUser?.[0]?.count || 0;
   const maxActionCount = analytics?.byAction?.[0]?.count || 0;
@@ -288,7 +280,7 @@ const handleBulkDelete = async () => {
           <h1 className="page-title">Activity Logs</h1>
           <p className="page-subtitle">Complete audit trail of all actions in CRED 360.</p>
         </div>
-        <button className="btn btn-secondary" onClick={() => activeTab === 'table' ? fetchLogs(scope) : fetchAnalytics()}>
+        <button className="btn btn-secondary" onClick={() => activeTab === 'table' ? setReload(n => n + 1) : fetchAnalytics()}>
           <RiRefreshLine size={16} />
         </button>
       </div>
@@ -310,160 +302,41 @@ const handleBulkDelete = async () => {
       </div>
 
       {activeTab === 'table' && (
-        <div className="card">
-          <div className="table-toolbar" style={{ flexWrap: 'wrap', gap: 12 }}>
-            <div className="search-box">
-              <RiSearchLine size={16} className="search-icon" />
-              <input
-                type="text"
-                placeholder="Search logs..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="search-input"
-              />
+        <DataTable
+          columns={columns}
+          fetchPage={fetchPage}
+          refreshKey={`${scope}-${reload}`}
+          dateField="created_time"
+          searchPlaceholder="Search action, user or details…"
+          filters={[{ key: 'action', label: 'All Actions', options: ACTION_FILTERS.filter(f => f.value !== 'all') }]}
+          selectable
+          selected={selectedIds}
+          onSelectedChange={setSelectedIds}
+          onRowClick={setSelectedLog}
+          emptyIcon={<RiHistoryLine size={34} />}
+          emptyText="No activity yet"
+          defaultPageSize={15}
+          toolbarExtra={isAdmin && (
+            <div className="scope-toggle">
+              <span className={scope === 'mine' ? 'active' : ''}>Mine</span>
+              <label className="form-check form-switch" style={{ margin: 0 }}>
+                <input
+                  type="checkbox"
+                  className="form-check-input"
+                  checked={scope === 'org'}
+                  onChange={() => setScope(s => (s === 'mine' ? 'org' : 'mine'))}
+                />
+              </label>
+              <span className={scope === 'org' ? 'active' : ''}>Organization</span>
             </div>
-
-            <div className="flex gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-              {isAdmin && (
-                <div className="scope-toggle">
-                  <span className={scope === 'mine' ? 'active' : ''}>Mine</span>
-                  <label className="form-check form-switch" style={{ margin: 0 }}>
-                    <input
-                      type="checkbox"
-                      className="form-check-input"
-                      checked={scope === 'org'}
-                      onChange={() => setScope(s => (s === 'mine' ? 'org' : 'mine'))}
-                    />
-                  </label>
-                  <span className={scope === 'org' ? 'active' : ''}>Organization</span>
-                </div>
-              )}
-
-              {selectedIds.length > 0 && (
-                <button className="btn btn-danger btn-sm" onClick={handleBulkDelete} disabled={deleting}>
-                  <RiDeleteBinLine size={14} />
-                  {deleting ? 'Deleting...' : `Delete (${selectedIds.length})`}
-                </button>
-              )}
-
-              <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)}>
-                {ACTION_FILTERS.map(f => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
-              <select className="filter-select" value={pageSize} onChange={e => setPageSize(Number(e.target.value))}>
-                <option value={10}>10 / page</option>
-                <option value={15}>15 / page</option>
-                <option value={25}>25 / page</option>
-                <option value={50}>50 / page</option>
-              </select>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="table-loading">
-              {[...Array(6)].map((_, i) => <div key={i} className="skeleton-row" />)}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="empty-state">
-              <RiHistoryLine size={40} />
-              <p>{search ? 'No logs match your search' : 'No activity yet'}</p>
-            </div>
-          ) : (
-            <>
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 34 }}>
-                        <input
-                          type="checkbox"
-                          checked={allOnPageSelected}
-                          onChange={toggleSelectAllOnPage}
-                        />
-                      </th>
-                      <th>Action</th>
-                      <th>Details</th>
-                      <th>User</th>
-                      <th>When</th>
-                      <th>Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginated.map((log, i) => {
-                      const color = getActionColor(log.action);
-                      const display = getUserDisplay(log);
-                      const isYou = display === 'You';
-                      const checked = selectedIds.includes(log.ROWID);
-                      return (
-                        <tr
-                          key={log.ROWID || i}
-                          onClick={() => setSelectedLog(log)}
-                          style={{ cursor: 'pointer' }}
-                          className={`table-row-hover ${checked ? 'row-selected' : ''}`}
-                        >
-                          <td onClick={e => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={e => toggleSelectOne(log.ROWID, e)}
-                            />
-                          </td>
-                          <td>
-                            <div className="flex gap-8" style={{ alignItems: 'center' }}>
-                              <div className="pw-icon" style={{ background: color.bg, color: color.color }}>
-                                {getActionIcon(log.action)}
-                              </div>
-                              <span className="td-bold">{log.action}</span>
-                            </div>
-                          </td>
-                          <td className="td-muted" style={{ maxWidth: 240 }}>
-                            <span style={{
-                              display: 'block', whiteSpace: 'nowrap',
-                              overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240,
-                            }}>
-                              {formatDetails(log.action, log.details, log.user_email)}
-                            </span>
-                          </td>
-                          <td className="td-muted">
-                            {display
-                              ? (isYou ? <span className="badge badge-info">You</span> : display)
-                              : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>External</span>
-                            }
-                          </td>
-                          <td>
-                            <span className="badge" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>
-                              {timeAgo(log.created_time)}
-                            </span>
-                          </td>
-                          <td className="td-muted" style={{ fontSize: 12 }}>
-                            {log.created_time
-                              ? new Date(log.created_time.replace(' ', 'T') + 'Z').toLocaleString()
-                              : '—'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="pagination-row">
-                <div className="pagination-info">
-                  Showing {Math.min((page - 1) * pageSize + 1, filtered.length)}–
-                  {Math.min(page * pageSize, filtered.length)} of {filtered.length} logs
-                </div>
-                <div className="pagination">
-                  <button className="page-btn" disabled={page === 1} onClick={() => setPage(1)}>«</button>
-                  <button className="page-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</button>
-                  {renderPageButtons()}
-                  <button className="page-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
-                  <button className="page-btn" disabled={page === totalPages} onClick={() => setPage(totalPages)}>»</button>
-                </div>
-              </div>
-            </>
           )}
-        </div>
+          bulkActions={() => (
+            <button className="btn btn-danger btn-sm" onClick={handleBulkDelete} disabled={deleting}>
+              <RiDeleteBinLine size={14} />
+              {deleting ? 'Deleting...' : `Delete (${selectedIds.length})`}
+            </button>
+          )}
+        />
       )}
 
       {activeTab === 'analytics' && (
@@ -537,33 +410,14 @@ const handleBulkDelete = async () => {
       )}
 
       {/* ── Offcanvas backdrop ── */}
-      {selectedLog && (
-        <div
-          style={{
-            position: 'fixed', inset: 0,
-            background: 'rgba(0,0,0,0.3)',
-            zIndex: 1000,
-          }}
-          onClick={() => setSelectedLog(null)}
-        />
-      )}
+      <div
+        className={`offcanvas-backdrop ${selectedLog ? 'open' : ''}`}
+        onClick={() => setSelectedLog(null)}
+      />
 
       {/* ── Offcanvas panel ── */}
-      <div style={{
-        position: 'fixed',
-        top: 0, right: 0,
-        width: 380,
-        height: '100vh',
-        background: 'var(--card-bg)',
-        borderLeft: '0.5px solid var(--border-color)',
-        zIndex: 1001,
-        display: 'flex',
-        flexDirection: 'column',
-        transform: selectedLog ? 'translateX(0)' : 'translateX(100%)',
-        transition: 'transform 0.25s ease',
-        boxShadow: selectedLog ? '-4px 0 24px rgba(0,0,0,0.08)' : 'none',
-      }}>
-        <div style={{
+      <div className={`offcanvas-panel ks-oc ${selectedLog ? 'open' : ''}`} style={{ overflowY: 'auto' }}>
+        <div className="ks-oc-head" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '16px 20px',
           borderBottom: '0.5px solid var(--border-color)',
@@ -610,11 +464,9 @@ const handleBulkDelete = async () => {
               />
               <DetailRow
                 label="Time"
-                value={selectedLog.created_time
-                  ? new Date(selectedLog.created_time.replace(' ', 'T') + 'Z').toLocaleString()
-                  : '—'}
+                value={formatDateTime(selectedLog.created_time)}
               />
-              <DetailRow label="Time ago" value={timeAgo(selectedLog.created_time)} />
+              <DetailRow label="Time ago" value={formatRelative(selectedLog.created_time)} />
               {selectedLog.password_id && (
                 <DetailRow label="Reference ID" value={selectedLog.password_id} />
               )}

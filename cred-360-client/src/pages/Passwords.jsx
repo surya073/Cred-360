@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import {
   RiKeyLine, RiAddLine, RiEditLine, RiDeleteBinLine,
   RiEyeLine, RiEyeOffLine, RiSearchLine, RiShareLine,
@@ -96,10 +96,10 @@ const Passwords = () => {
   }, []);
 
   // ── ONE combined fetch for passwords + folders ──
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (fresh) => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/api/folders-with-passwords`);
+      const res = await axios.get(`${API}/api/folders-with-passwords`, { fresh: fresh === true });
       if (res.data.success) {
         setPasswords(res.data.passwords || []);
         setFolders(res.data.folders    || []);
@@ -354,7 +354,7 @@ const handleSave = async () => {
           <p className="page-subtitle">{myPasswords.length} passwords stored securely</p>
         </div>
         <div className="flex gap-8">
-          <button className="btn btn-secondary" onClick={fetchData} title="Refresh">
+          <button className="btn btn-secondary" onClick={() => fetchData(true)} title="Refresh">
             <RiRefreshLine size={16} />
           </button>
           <button className="btn btn-secondary" onClick={exportCSV}>

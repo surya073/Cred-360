@@ -287,8 +287,6 @@
   height: 7px;
   border-radius: 50%;
   background: #ffffff;
-  box-shadow: 0 0 12px #ffffff;
-  animation: activePulse 1.5s ease-in-out infinite;
   z-index: 1;
 }
 

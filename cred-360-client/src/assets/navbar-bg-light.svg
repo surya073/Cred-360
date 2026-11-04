@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="120" viewBox="0 0 1600 120" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e6f6ef"/><stop offset="0.5" stop-color="#d4efe3"/><stop offset="1" stop-color="#e3f1fb"/>
+    </linearGradient>
+    <radialGradient id="b1" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#2f9e76" stop-opacity="0.35"/><stop offset="1" stop-color="#2f9e76" stop-opacity="0"/></radialGradient>
+    <radialGradient id="b2" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#38bdf8" stop-opacity="0.28"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1600" height="120" fill="url(#g)"/>
+  <ellipse cx="260" cy="30" rx="320" ry="110" fill="url(#b1)"/>
+  <ellipse cx="1250" cy="100" rx="380" ry="120" fill="url(#b2)"/>
+  <path d="M0 88 C 200 40, 380 120, 600 76 S 1000 30, 1200 80 S 1500 100, 1600 60" fill="none" stroke="#2f9e76" stroke-opacity="0.22" stroke-width="2"/>
+  <path d="M0 104 C 240 60, 420 130, 660 94 S 1040 52, 1240 98 S 1520 112, 1600 84" fill="none" stroke="#0f2a22" stroke-opacity="0.08" stroke-width="1.5"/>
+</svg>

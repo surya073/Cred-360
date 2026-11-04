@@ -2,7 +2,19 @@
    MODAL — CRED 360  |  Premium Edition
 ════════════════════════════════════════════ */
 
-/* ── Scroll lock (add/remove via JS) ── */
+/* ── Scroll lock (toggled automatically by utils/scrollLock.js) ── */
+html {
+  scrollbar-gutter: stable; /* no layout shift when the scrollbar is hidden */
+}
+
+.modal-overlay,
+.sa-overlay,
+.gs-modal-backdrop,
+.eu-modal-backdrop,
+.eu-offcanvas-backdrop {
+  overscroll-behavior: contain; /* don't chain scroll to the page behind */
+}
+
 body.modal-open {
   overflow: hidden !important;
 }

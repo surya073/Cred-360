@@ -1,0 +1,179 @@
+/* ════════════════════════════════════════════════════════════
+   CRED 360 — Global polish layer
+   Loaded LAST so it refines the base styles without touching them.
+   Goals: readable contrast, one consistent purple accent, clear keyboard
+   focus, softer depth, calmer motion.
+════════════════════════════════════════════════════════════ */
+
+/* ── 1. Contrast fixes ─────────────────────────────────────── */
+:root {
+  --text-muted:   #6b7f9e;           /* was #8096b8 (~2.9:1) → ~4.2:1 on white */
+  --border:       #e1e8f4;
+  --focus-ring:   0 0 0 3px rgb(var(--primary-rgb) / 0.28);
+  --ring-offset:  0 0 0 2px var(--bg-primary);
+}
+
+[data-theme="dark"] {
+  --text-muted:   #7385a6;           /* was #3a4d6a (~1.9:1) → ~5:1 on #080808 */
+  --text-secondary: #9db0cf;
+  --border:       #232329;
+  --border-hover: #34343d;
+  --border-strong:#3a3a45;
+}
+
+html { scroll-behavior: smooth; }
+
+/* ── 2. Keyboard focus (was globally removed) ──────────────── */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.form-input:focus-visible,
+.search-input:focus-visible,
+.filter-select:focus-visible {
+  outline: none;                       /* these use the glow ring below */
+}
+
+/* ── 3. Inputs ─────────────────────────────────────────────── */
+.form-input,
+.search-input,
+.filter-select {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.form-input:hover:not(:focus):not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+.form-input:focus,
+.search-input:focus,
+.filter-select:focus {
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+
+/* ── 4. Buttons — consistent purple glow (base used indigo) ── */
+.btn {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 4px 12px rgb(var(--primary-rgb) / 0.22);
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12), 0 8px 20px rgb(var(--primary-rgb) / 0.35);
+}
+
+.btn-primary:active { transform: translateY(0) scale(0.99); }
+
+.btn-primary:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-offset), 0 0 0 4px rgb(var(--primary-rgb) / 0.5);
+}
+
+.btn-secondary:hover {
+  background: rgb(var(--primary-rgb) / 0.07);
+  border-color: rgb(var(--primary-rgb) / 0.6);
+  transform: translateY(-1px);
+}
+
+.btn-danger:hover { transform: translateY(-1px); }
+
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+  filter: none;
+}
+
+/* ── 5. Cards & stat tiles — softer, calmer depth ──────────── */
+.card {
+  box-shadow: 0 1px 2px rgba(10, 20, 60, 0.04), 0 6px 20px rgba(10, 20, 60, 0.05);
+}
+
+.card:hover {
+  border-color: rgb(var(--primary-rgb) / 0.35);
+  box-shadow: 0 2px 4px rgba(10, 20, 60, 0.05), 0 12px 28px rgba(10, 20, 60, 0.08);
+}
+
+.stat-card {
+  box-shadow: 0 1px 2px rgba(10, 20, 60, 0.05), 0 8px 22px rgba(10, 20, 60, 0.07);
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 32px rgb(var(--primary-rgb) / 0.16), 0 3px 10px rgba(10, 20, 60, 0.06);
+}
+
+[data-theme="dark"] .card,
+[data-theme="dark"] .stat-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="dark"] .stat-card {
+  background: linear-gradient(145deg, var(--bg-secondary), var(--bg-tertiary));
+}
+
+/* ── 6. Page header — clearer hierarchy ────────────────────── */
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.page-subtitle { color: var(--text-muted); }
+
+/* ── 7. Tables — quiet header, tinted row hover ────────────── */
+.data-table th {
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.data-table th:first-child { border-top-left-radius: var(--radius-md); }
+.data-table th:last-child  { border-top-right-radius: var(--radius-md); }
+
+.data-table tbody tr { transition: background 0.15s ease; }
+
+.data-table tr:hover td {
+  background: rgb(var(--primary-rgb) / 0.05);
+}
+
+/* ── 8. Modals — a touch more depth, gentler backdrop ──────── */
+.modal-overlay { background: rgba(8, 10, 24, 0.5); }
+
+.modal {
+  border-radius: var(--radius-xl);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14), 0 32px 80px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .modal {
+  border-color: var(--border-strong);
+}
+
+/* ── 9. Top progress bar (base rgba() used an invalid var) ─── */
+.top-progress { box-shadow: 0 0 8px rgb(var(--primary-rgb) / 0.6); }
+
+/* ── 10. Selection ─────────────────────────────────────────── */
+::selection { background: rgb(var(--primary-rgb) / 0.25); }
+
+/* ── 11. Respect reduced-motion preferences ────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

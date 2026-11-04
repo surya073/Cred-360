@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import Toast, { useToast } from './Toast';
 import {
   RiFolderLine, RiUserLine, RiTeamLine,

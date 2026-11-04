@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import Login from '../pages/Login';
 
-const CATALYST_LOGIN = 'https://keyshare-60069659585.development.catalystserverless.in/__catalyst/auth/login';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -20,10 +20,7 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  if (!user) {
-    window.location.href = CATALYST_LOGIN;
-    return null;
-  }
+  if (!user) return <Login />;
 
   return <>{children}</>;
 };

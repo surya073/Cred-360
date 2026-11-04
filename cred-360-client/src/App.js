@@ -1,25 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
+import { HashRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProfileProvider } from './context/ProfileContext';
 import { ShareNotifProvider } from './context/ShareNotifContext';
 import { NavbarProvider } from './context/NavbarContext';
+import { TimezoneProvider, useTimeZone } from './context/TimezoneContext';
 
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
-import Dashboard from './pages/Dashboard';
-import Passwords from './pages/Passwords';
-import Folders from './pages/Folders';
-import Users from './pages/Users';
-import Teams from './pages/Teams';
-import Settings from './pages/Settings';
-import PublicShare from './pages/PublicShare';
-import ShareManager from './pages/ShareManager';
-import ActivityLogs from './pages/ActivityLogs';
-import Categories from './pages/Categories';
-import ExternalUsers from './pages/ExternalUsers';
-import keyshareLogo from './assets/images/keyShare-logo.png';
+import KeyShareLogo from './components/KeyShareLogo';
 
 import './styles/theme.css';
 import './styles/layout.css';
@@ -32,30 +22,61 @@ import './styles/modal.css';
 import './styles/settings.css';
 import './styles/responsive.css';
 import './styles/auth.css';
+import './styles/polish.css';
+import './styles/glass.css';
+import './styles/nexus-dashboard.css';
+import './styles/shell-nexus.css';
+import './styles/unified.css';
+import './styles/toast.css';
+import './styles/datatable.css';
+import './styles/premium.css';
 
-const AppLayout = ({ children, collapsed, mobileOpen, onToggle, onOverlayClick, onMenuClick,loading }) => (
-  <div className="app-container">
-    <Sidebar
-      collapsed={collapsed}
-      mobileOpen={mobileOpen}
-      onOverlayClick={onOverlayClick}
-      onMenuClick={onMenuClick}
-    />
-    <div className={`main-wrapper ${collapsed ? 'sidebar-collapsed' : ''}`}>
-      <Navbar
+// Route-level code splitting: each page loads on demand
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Passwords = lazy(() => import('./pages/Passwords'));
+const Folders = lazy(() => import('./pages/Folders'));
+const Users = lazy(() => import('./pages/Users'));
+const Teams = lazy(() => import('./pages/Teams'));
+const Settings = lazy(() => import('./pages/Settings'));
+const PublicShare = lazy(() => import('./pages/PublicShare'));
+const Login = lazy(() => import('./pages/Login'));
+const ShareManager = lazy(() => import('./pages/ShareManager'));
+const ActivityLogs = lazy(() => import('./pages/ActivityLogs'));
+const Categories = lazy(() => import('./pages/Categories'));
+const ExternalUsers = lazy(() => import('./pages/ExternalUsers'));
+
+// One persistent shell: Sidebar/Navbar stay mounted across navigation (no refetch / re-init);
+// only the page area is keyed by path so it re-plays its enter animation.
+const AppLayout = ({ collapsed, mobileOpen, onToggle, onOverlayClick, onMenuClick, loading }) => {
+  const { pathname } = useLocation();
+  return (
+    <div className="app-container">
+      <Sidebar
         collapsed={collapsed}
-        onToggleSidebar={onToggle}
+        mobileOpen={mobileOpen}
+        onOverlayClick={onOverlayClick}
+        onMenuClick={onMenuClick}
       />
-      <main className="main-content page-enter">
-        {loading && <div className="top-progress" />}
-        {children}
-      </main>
+      <div className={`main-wrapper ${collapsed ? 'sidebar-collapsed' : ''}`}>
+        <Navbar
+          collapsed={collapsed}
+          onToggleSidebar={onToggle}
+        />
+        <main key={pathname} className="main-content page-enter">
+          {loading && <div className="top-progress" />}
+          {/* Each page is its own chunk, so the first load only ships what is needed */}
+          <Suspense fallback={<div className="top-progress" />}>
+            <Outlet />
+          </Suspense>
+        </main>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const AuthenticatedRoutes = () => {
   const { user, loading } = useAuth();
+  const { timeZone } = useTimeZone();
   const [collapsed, setCollapsed]   = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -89,7 +110,7 @@ const AuthenticatedRoutes = () => {
     return (
       <div className="preloader">
         <div>
-          <img src={keyshareLogo} alt="KeyShare Logo" className="preloader-logo" />
+          <KeyShareLogo size={76} className="preloader-logo" />
         </div>
         <div className="preloader-brand">KEYSHARE</div>
         <div className="preloader-sub">Secure Password Management</div>
@@ -101,44 +122,24 @@ const AuthenticatedRoutes = () => {
     );
   }
 
-  if (!user) {
-    window.location.replace('/__catalyst/auth/login');
-    return null;
-  }
+  // Not signed in → embedded Catalyst sign-in widget (no redirect to hosted page)
+  if (!user) return <Suspense fallback={null}><Login /></Suspense>;
 
   return (
-    <Routes>
-      <Route path="/" element={
-        <AppLayout {...layoutProps}><Dashboard /></AppLayout>
-      } />
-      <Route path="/passwords" element={
-        <AppLayout {...layoutProps}><Passwords /></AppLayout>
-      } />
-      <Route path="/folders" element={
-        <AppLayout {...layoutProps}><Folders /></AppLayout>
-      } />
-      <Route path="/shares" element={
-        <AppLayout {...layoutProps}><ShareManager /></AppLayout>
-      } />
-      <Route path="/users" element={
-        <AppLayout {...layoutProps}><Users /></AppLayout>
-      } />
-      <Route path="/teams" element={
-        <AppLayout {...layoutProps}><Teams /></AppLayout>
-      } />
-      <Route path="/settings" element={
-        <AppLayout {...layoutProps}><Settings /></AppLayout>
-      } />
-      <Route path="/activity" element={
-        <AppLayout {...layoutProps}><ActivityLogs /></AppLayout>
-      } />
-      <Route path="/categories" element={                    
-        <AppLayout {...layoutProps}><Categories /></AppLayout>
-      } />
-      <Route path="/external-users" element={
-        <AppLayout {...layoutProps}><ExternalUsers /></AppLayout>
-      } />
-      
+    // keyed by time zone so every page re-renders its dates when the zone changes
+    <Routes key={timeZone}>
+      <Route element={<AppLayout {...layoutProps} />}>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/passwords" element={<Passwords />} />
+        <Route path="/folders" element={<Folders />} />
+        <Route path="/shares" element={<ShareManager />} />
+        <Route path="/users" element={<Users />} />
+        <Route path="/teams" element={<Teams />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/activity" element={<ActivityLogs />} />
+        <Route path="/categories" element={<Categories />} />
+        <Route path="/external-users" element={<ExternalUsers />} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -147,9 +148,10 @@ const AuthenticatedRoutes = () => {
 function App() {
   return (
     <ThemeProvider>
+     <TimezoneProvider>
       <HashRouter>
         <Routes>
-          <Route path="/share/:token" element={<PublicShare />} />
+          <Route path="/share/:token" element={<Suspense fallback={null}><PublicShare /></Suspense>} />
           <Route path="/*" element={
             <AuthProvider>
               <ProfileProvider>
@@ -163,6 +165,7 @@ function App() {
           } />
         </Routes>
       </HashRouter>
+     </TimezoneProvider>
     </ThemeProvider>
   );
 }

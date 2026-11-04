@@ -3,7 +3,8 @@
     "targets": [
       "cred_360_function",
       "cred_360_people_function",
-      "cred_360_extras_function"
+      "cred_360_extras_function",
+      "cred_360_stream_function"
     ],
     "ignore": [],
     "source": "functions"

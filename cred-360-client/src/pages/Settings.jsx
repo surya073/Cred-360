@@ -2,12 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import Toast, { useToast } from '../components/Toast';
-import axios from 'axios';
+import axios from '../services/api';
 import {
   RiUserLine, RiPaletteLine, RiShieldLine,
   RiSaveLine, RiMoonLine, RiSunLine,
-  RiCheckLine, RiCameraLine, RiUploadLine
+  RiCheckLine, RiCameraLine, RiUploadLine,
+  RiGlobalLine, RiMapPinTimeLine
 } from 'react-icons/ri';
+import { useTimeZone } from '../context/TimezoneContext';
+import {
+  DEFAULT_TIMEZONE, listTimeZones, offsetLabel, formatDate, formatTime, formatDateTime
+} from '../utils/dateHelper';
 import {
   FaChrome, FaEdge, FaFirefox, FaSafari, FaOpera, FaGlobe
 } from 'react-icons/fa';
@@ -17,104 +22,42 @@ import { useProfile } from '../context/ProfileContext';
 
 const API = '/server/cred_360_function';
 
-const COLORS = [
-  { label: 'Violet',  value: '#7c3aed', dark: '#6d28d9', light: '#ede9fe' },
-  { label: 'Indigo',  value: '#4f46e5', dark: '#4338ca', light: '#eef2ff' },
-  { label: 'Blue',    value: '#2563eb', dark: '#1d4ed8', light: '#eff6ff' },
-  { label: 'Sky',     value: '#0284c7', dark: '#0369a1', light: '#f0f9ff' },
-  { label: 'Cyan',    value: '#0891b2', dark: '#0e7490', light: '#ecfeff' },
-  { label: 'Teal',    value: '#0d9488', dark: '#0f766e', light: '#f0fdfa' },
-  { label: 'Emerald', value: '#059669', dark: '#047857', light: '#ecfdf5' },
-  { label: 'Green',   value: '#16a34a', dark: '#15803d', light: '#f0fdf4' },
-  { label: 'Lime',    value: '#65a30d', dark: '#4d7c0f', light: '#f7fee7' },
-  { label: 'Amber',   value: '#d97706', dark: '#b45309', light: '#fffbeb' },
-  { label: 'Orange',  value: '#ea580c', dark: '#c2410c', light: '#fff7ed' },
-  { label: 'Crimson', value: '#dc2626', dark: '#b91c1c', light: '#fef2f2' },
-  { label: 'Rose',    value: '#e11d48', dark: '#be123c', light: '#fff1f2' },
-  { label: 'Pink',    value: '#db2777', dark: '#be185d', light: '#fdf2f8' },
-  { label: 'Fuchsia', value: '#c026d3', dark: '#a21caf', light: '#fdf4ff' },
-  { label: 'Slate',   value: '#475569', dark: '#334155', light: '#f1f5f9' },
-];
-
-const STYLES = [
-  {
-    id: 'modern',
-    label: 'Modern',
-    description: 'Bold curves, layered depth',
-    radius: '14px',
-    shadow: '0 8px 20px rgba(0,0,0,0.14)',
-    border: '1px solid var(--border)',
-  },
-  {
-    id: 'classic',
-    label: 'Classic',
-    description: 'Crisp corners, structured lines',
-    radius: '4px',
-    shadow: '0 1px 3px rgba(0,0,0,0.12)',
-    border: '1.5px solid var(--border-strong)',
-  },
-  {
-    id: 'elegant',
-    label: 'Elegant',
-    description: 'Soft curves, hushed depth',
-    radius: '20px',
-    shadow: '0 10px 28px rgba(0,0,0,0.08)',
-    border: '1px solid var(--border)',
-  },
-  {
-    id: 'minimal',
-    label: 'Minimal',
-    description: 'Flat, quiet, no shadow',
-    radius: '2px',
-    shadow: 'none',
-    border: '1px solid var(--border)',
-  },
-];
-
-  const THEME_PRESETS = [
-  {
-    id: 'plain', label: 'Plain', description: 'Your custom primary color',
-    preview: 'linear-gradient(135deg, var(--bg-secondary) 50%, var(--bg-tertiary) 50%)',
-    color: null,
-  },
-  {
-    id: 'sunset', label: 'Sunset', description: 'Warm dusk gradient',
-    preview: 'linear-gradient(135deg, #ff9a56, #ff6b9d, #845ec2)',
-    color: { value: '#f97316', dark: '#c2410c', light: '#fff2e8' },
-  },
-  {
-    id: 'midnight', label: 'Midnight', description: 'Deep indigo glow',
-    preview: 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)',
-    color: { value: '#6366f1', dark: '#4338ca', light: '#eef2ff' },
-  },
-  {
-    id: 'ocean', label: 'Ocean', description: 'Cool teal depths',
-    preview: 'linear-gradient(135deg, #0f2027, #203a43, #2c5364)',
-    color: { value: '#0891b2', dark: '#0e7490', light: '#ecfeff' },
-  },
-  {
-    id: 'aurora', label: 'Aurora', description: 'Northern lights shimmer',
-    preview: 'linear-gradient(135deg, #00c6a7, #7c3aed, #1e0a45)',
-    color: { value: '#14b8a6', dark: '#0f766e', light: '#f0fdfa' },
-  },
-  {
-    id: 'forest', label: 'Forest', description: 'Muted evergreen tones',
-    preview: 'linear-gradient(135deg, #0f3d2e, #1a5f4a, #2d6a4f)',
-    color: { value: '#16a34a', dark: '#15803d', light: '#f0fdf4' },
-  },
-];
-
-
 const Settings = () => {
   const { user } = useAuth();
   const { toasts, removeToast, toast } = useToast();
   const fileInputRef = useRef(null);
-  const { theme, toggleTheme, bgFeel, setBgFeel } = useTheme();
-
-
-
+  const { theme, toggleTheme } = useTheme();
+  const { timeZone, setTimeZone } = useTimeZone();
   const [activeTab, setActiveTab]     = useState('profile');
-  const [username, setUsername]       = useState(user?.first_name || '');
+  const [tzSearch, setTzSearch] = useState('');
+  const [now, setNow] = useState(() => new Date());
+  const zones = React.useMemo(() => listTimeZones(), []);
+  const deviceTz = React.useMemo(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return null; }
+  }, []);
+
+  // live clock for the Region preview
+  useEffect(() => {
+    if (activeTab !== 'region') return undefined;
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const applyTimeZone = (tz, label) => {
+    setTimeZone(tz);
+    toast.success(`Time zone set to ${label || tz.replace(/_/g, ' ')}`);
+  };
+
+  const visibleZones = zones.filter(z =>
+    !tzSearch || z.label.toLowerCase().includes(tzSearch.toLowerCase()));
+  const zonesByRegion = visibleZones.reduce((acc, z) => {
+    (acc[z.region] = acc[z.region] || []).push(z);
+    return acc;
+  }, {});
+
+
+  const [username, setUsername]      = useState(user?.first_name || '');
   const [saving, setSaving]           = useState(false);
   const [profileImage, setProfileImage] = useState(null);
   const [imageFileId, setImageFileId]   = useState(null);
@@ -124,21 +67,6 @@ const Settings = () => {
   const { updateProfileImage } = useProfile();
   const [cropSrc, setCropSrc] = useState(null);
   const [showCropper, setShowCropper] = useState(false);
-
-  const [activeColor, setActiveColor] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ks-primary');
-      if (saved) return JSON.parse(saved).value;
-    } catch(e) {}
-    return '#7c3aed';
-  });
-
-  const [activeStyle, setActiveStyle] = useState(() => {
-    try {
-      return localStorage.getItem('ks-style') || 'modern';
-    } catch(e) {}
-    return 'modern';
-  });
 
   const getBrowser = () => {
   const ua = navigator.userAgent;
@@ -169,13 +97,6 @@ const isDirty = username !== (user?.first_name || '');
       console.log('Profile info error:', e.message);
     }
   };
-
-  const applyColorToRoot = (color) => {
-  const root = document.documentElement;
-  root.style.setProperty('--primary', color.value);
-  root.style.setProperty('--primary-dark', color.dark);
-  root.style.setProperty('--primary-light', color.light);
-};
 
   const handleSaveProfile = async () => {
   if (!username.trim()) return toast.error('Username cannot be empty.');
@@ -243,42 +164,11 @@ const isDirty = username !== (user?.first_name || '');
   }
 };
 
- const applyColor = (color) => {
-    applyColorToRoot(color);
-    localStorage.setItem('ks-primary', JSON.stringify(color));
-    localStorage.setItem('ks-primary-custom', JSON.stringify(color));
-    setActiveColor(color.value);
-    toast.success(`Theme color changed to ${color.label}`);
-  };
-
-  const applyStyle = (style) => {
-    document.documentElement.setAttribute('data-style', style.id);
-    localStorage.setItem('ks-style', style.id);
-    setActiveStyle(style.id);
-    toast.success(`Theme style set to ${style.label}`);
-  };
-
-const applyBgFeel = (preset) => {
-    setBgFeel(preset.id);
-    if (preset.id === 'plain') {
-      try {
-        const saved = localStorage.getItem('ks-primary-custom');
-        const color = saved ? JSON.parse(saved) : COLORS[0];
-        applyColorToRoot(color);
-        setActiveColor(color.value);
-      } catch(e) {}
-    } else {
-      applyColorToRoot(preset.color);
-      localStorage.setItem('ks-primary', JSON.stringify(preset.color));
-      setActiveColor(preset.color.value);
-    }
-    toast.success(`Theme set to ${preset.label}`);
-  };
-
   const tabs = [
     { id: 'profile',    label: 'Profile',    icon: <RiUserLine size={16} />    },
     { id: 'appearance', label: 'Appearance', icon: <RiPaletteLine size={16} /> },
-    { id: 'security',   label: 'Security',   icon: <RiShieldLine size={16} />  },
+    { id: 'region',     label: 'Region & Time', icon: <RiGlobalLine size={16} /> },
+    { id: 'security',  label: 'Security',   icon: <RiShieldLine size={16} />  },
   ];
 
   const getInitial = () =>
@@ -303,7 +193,7 @@ const handleResetPassword = async () => {
 
 const handleLogout = () => {
   const auth = window.catalyst.auth;
-  auth.signOut(window.location.origin);
+  auth.signOut(window.location.origin + "/app/index.html");
 };
 
   return (
@@ -444,93 +334,77 @@ const handleLogout = () => {
                 </div>
               </div>
 
-              <div className="settings-divider" />
+            </div>
+          )}
 
-              <div className="settings-section-label">Theme Style</div>
-           <div className="style-grid stagger-in">
-                {STYLES.map(style => {
-                  const isActive = activeStyle === style.id;
-                  return (
-                    <div
-                      key={style.id}
-                      className={`style-card ${isActive ? 'active' : ''}`}
-                      onClick={() => applyStyle(style)}
-                    >
-                      {isActive && <RiCheckLine className="style-card-check" size={14} />}
-                      <div
-                        className="style-card-preview"
-                        style={{
-                          borderRadius: style.radius,
-                          boxShadow: style.shadow,
-                          border: style.border,
-                        }}
-                      >
-                        <span
-                          className="style-card-preview-bar"
-                          style={{ borderRadius: `calc(${style.radius} / 2)` }}
-                        />
-                      </div>
-                      <div className="style-card-label">{style.label}</div>
-                      <div className="style-card-desc">{style.description}</div>
-                    </div>
-                  );
-                })}
+          {activeTab === 'region' && (
+            <div className="card">
+              <div className="card-header">
+                <h2 className="card-title">Region &amp; Time</h2>
               </div>
 
-              <div className="settings-divider" />
-
-              <div className="settings-section-label">Theme Presets</div>
-              <div className="bgfeel-grid stagger-in">
-                {THEME_PRESETS.map(preset => {
-                  const isActive = bgFeel === preset.id;
-                  return (
-                    <div
-                      key={preset.id}
-                      className={`bgfeel-card ${isActive ? 'active' : ''}`}
-                      onClick={() => applyBgFeel(preset)}
-                    >
-                      {isActive && <RiCheckLine className="bgfeel-card-check" size={14} />}
-                      <div className="bgfeel-card-preview" style={{ background: preset.preview }} />
-                      <div className="bgfeel-card-label">{preset.label}</div>
-                      <div className="bgfeel-card-desc">{preset.description}</div>
-                    </div>
-                  );
-                })}
+              <div className="tz-hero">
+                <div className="tz-hero-icon"><RiMapPinTimeLine size={26} /></div>
+                <div className="tz-hero-body">
+                  <div className="tz-hero-label">Current time zone</div>
+                  <div className="tz-hero-zone">{timeZone.replace(/_/g, ' ')} <span>{offsetLabel(timeZone, now)}</span></div>
+                </div>
+                <div className="tz-hero-clock">
+                  <div className="tz-clock-time">{formatTime(now)}</div>
+                  <div className="tz-clock-date">{formatDate(now)}</div>
+                </div>
               </div>
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
-                A preset applies its own accent color across the app and locks manual color picking below. Choose "Plain" to customize your own color again.
-              </p>
 
-              <div className="settings-divider" />
-
-              <div className="settings-section-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>Primary Color</span>
-                {bgFeel !== 'plain' && (
-                  <span className="badge badge-neutral" style={{ textTransform: 'none', fontWeight: 500 }}>
-                    Controlled by {THEME_PRESETS.find(p => p.id === bgFeel)?.label} preset
-                  </span>
+              <div className="tz-quick">
+                <button
+                  className={`tz-chip ${timeZone === DEFAULT_TIMEZONE ? 'active' : ''}`}
+                  onClick={() => applyTimeZone(DEFAULT_TIMEZONE, 'India Standard Time')}
+                >
+                  India (IST)
+                </button>
+                {deviceTz && !['Asia/Kolkata', 'Asia/Calcutta'].includes(deviceTz) && (
+                  <button
+                    className={`tz-chip ${timeZone === deviceTz ? 'active' : ''}`}
+                    onClick={() => applyTimeZone(deviceTz)}
+                  >
+                    📍 This device ({deviceTz.replace(/_/g, ' ')})
+                  </button>
                 )}
+                <button className={`tz-chip ${timeZone === 'UTC' ? 'active' : ''}`} onClick={() => applyTimeZone('UTC', 'UTC')}>
+                  🌐 UTC
+                </button>
               </div>
-              <div className={`color-grid stagger-in ${bgFeel !== 'plain' ? 'color-grid-locked' : ''}`}>
-                {COLORS.map(color => {
-                  const isActive = activeColor === color.value;
-                  return (
-                    <div
-                      key={color.value}
-                      className={`color-chip ${isActive ? 'active' : ''}`}
-                      style={{ background: color.value }}
-                      onClick={() => bgFeel === 'plain' && applyColor(color)}
-                      title={color.label}
-                    >
-                      {isActive && <RiCheckLine size={16} color="#fff" />}
-                    </div>
-                  );
-                })}
+
+              <div className="settings-section-label">Choose any time zone in the world</div>
+              <input
+                className="form-input"
+                style={{ maxWidth: 360, marginBottom: 10 }}
+                placeholder="Search city or region… e.g. London, Tokyo"
+                value={tzSearch}
+                onChange={e => setTzSearch(e.target.value)}
+              />
+              <div className="tz-list">
+                {Object.keys(zonesByRegion).length === 0 && <div className="tz-empty">No time zone matches “{tzSearch}”</div>}
+                {Object.entries(zonesByRegion).map(([region, list]) => (
+                  <div key={region} className="tz-group">
+                    <div className="tz-group-title">{region}</div>
+                    {list.map(z => (
+                      <button
+                        key={z.value}
+                        className={`tz-item ${timeZone === z.value ? 'active' : ''}`}
+                        onClick={() => applyTimeZone(z.value)}
+                      >
+                        <span>{z.label}</span>
+                        {timeZone === z.value && <RiCheckLine size={16} />}
+                      </button>
+                    ))}
+                  </div>
+                ))}
               </div>
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
-                {bgFeel === 'plain'
-                  ? 'Color changes apply instantly across the app.'
-                  : 'Switch to the "Plain" preset above to pick a custom color.'}
+
+              <p className="tz-note">
+                Every date and time in KeyShare — tables, activity logs, shares, notifications and date filters — is shown in this zone.
+                The default is India Standard Time. This preference is saved on this browser.
               </p>
             </div>
           )}
@@ -592,7 +466,7 @@ const handleLogout = () => {
     <div className="security-item-sub">
       Logged in as {user?.email_id}
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
-        {getBrowser().icon} {getBrowser().name} · {new Date().toLocaleDateString(undefined, { dateStyle: 'medium' })}
+        {getBrowser().icon} {getBrowser().name} · {formatDateTime(new Date())}
       </div>
     </div>
   </div>

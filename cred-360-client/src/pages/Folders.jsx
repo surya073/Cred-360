@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import {
   RiFolderLine, RiAddLine, RiEditLine, RiDeleteBinLine,
   RiRefreshLine, RiSearchLine, RiFolderOpenLine,

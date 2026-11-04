@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import {
   RiBellLine, RiKeyLine, RiShareLine,
   RiUserAddLine, RiDeleteBinLine, RiEditLine,
@@ -9,8 +9,10 @@ import {
   RiUserUnfollowLine, RiShieldCheckLine, RiLockUnlockLine,
   RiFolderSharedLine, RiFolderForbidLine, RiEditBoxLine,
   RiDeleteBin6Line, RiNotificationOffLine, RiCheckLine,
-  RiErrorWarningLine, RiInformationLine, RiAlertLine
+  RiErrorWarningLine, RiInformationLine, RiAlertLine,
+  RiEyeLine, RiLockLine, RiPlayCircleLine
 } from 'react-icons/ri';
+import { formatRelative, dateKey, todayKey } from '../utils/dateHelper';
 import { useNavigate } from 'react-router-dom';
 
 // const API = '/server/cred_360_function';
@@ -42,6 +44,13 @@ const TYPE_META = {
   team_added:             { icon: RiTeamLine,          label: 'Added to Team',        module: 'Team Management',     priority: 'success' },
   member_added:           { icon: RiUserFollowLine,    label: 'Member Added',         module: 'Team Management',     priority: 'success' },
   member_removed:         { icon: RiUserUnfollowLine,  label: 'Member Removed',       module: 'Team Management',     priority: 'error' },
+  team_updated:           { icon: RiEditBoxLine,       label: 'Team Updated',         module: 'Team Management',     priority: 'info' },
+  team_deleted:           { icon: RiDeleteBin6Line,    label: 'Team Deleted',         module: 'Team Management',     priority: 'error' },
+  team_status_changed:    { icon: RiPlayCircleLine,    label: 'Team Status',          module: 'Team Management',     priority: 'warning' },
+
+  // External sharing
+  external_share_viewed:  { icon: RiEyeLine,           label: 'External Share Opened',module: 'Sharing',             priority: 'success' },
+  external_share_locked:  { icon: RiLockLine,          label: 'Link Locked',          module: 'Sharing',             priority: 'error' },
 
   // User Management
   role_changed:           { icon: RiShieldUserLine,    label: 'Role Changed',         module: 'User Management',     priority: 'warning' },
@@ -77,6 +86,13 @@ const getTargetRoute = (log) => {
     case 'member_added':
     case 'member_removed':
       return log.ref_id ? `/teams?highlight=${log.ref_id}` : '/teams';
+    case 'team_updated':
+    case 'team_deleted':
+    case 'team_status_changed':
+      return log.type === 'team_deleted' ? '/teams' : (log.ref_id ? `/teams?highlight=${log.ref_id}` : '/teams');
+    case 'external_share_viewed':
+    case 'external_share_locked':
+      return '/shares';
     case 'role_changed':
     case 'permissions_updated':
       return log.ref_id ? `/users?highlight=${log.ref_id}` : '/users';
@@ -85,18 +101,7 @@ const getTargetRoute = (log) => {
   }
 };
 
-const timeAgo = (dateStr) => {
-  if (!dateStr) return '';
-  const diff  = Date.now() - new Date(dateStr.replace(' ', 'T') + 'Z');
-  const mins  = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins < 1)   return 'Just now';
-  if (mins < 60)  return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7)   return `${days}d ago`;
-  return new Date(dateStr.replace(' ', 'T') + 'Z').toLocaleDateString();
-};
+const timeAgo = (dateStr) => formatRelative(dateStr, '');
 
 const cleanDetails = (details) => {
   if (!details) return null;
@@ -116,14 +121,11 @@ const byLine = (log) => {
 // Group label bucketing — Today / Yesterday / This Week / Earlier
 const getGroupLabel = (dateStr, now) => {
   if (!dateStr) return 'Earlier';
-  const d = new Date(dateStr.replace(' ', 'T') + 'Z');
-  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
-  const startOfYesterday = new Date(startOfToday); startOfYesterday.setDate(startOfYesterday.getDate() - 1);
-  const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfWeek.getDate() - 7);
-
-  if (d >= startOfToday) return 'Today';
-  if (d >= startOfYesterday) return 'Yesterday';
-  if (d >= startOfWeek) return 'This Week';
+  const k = dateKey(dateStr);
+  if (!k) return 'Earlier';
+  if (k === todayKey()) return 'Today';
+  if (k === dateKey(new Date(now.getTime() - 86400000))) return 'Yesterday';
+  if (k >= dateKey(new Date(now.getTime() - 7 * 86400000))) return 'This Week';
   return 'Earlier';
 };
 

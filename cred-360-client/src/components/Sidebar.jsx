@@ -14,9 +14,10 @@ import {
   RiHistoryLine,
   RiPriceTag3Line,
   RiGlobalLine,
+  RiLogoutBoxLine,
 } from 'react-icons/ri';
 
-import logo from '../assets/images/keyShare-logo.png';
+import KeyShareLogo from './KeyShareLogo';
 import Tooltip from './Tooltip';
 
 const Sidebar = ({
@@ -25,7 +26,7 @@ const Sidebar = ({
   onOverlayClick,
   onMenuClick,
 }) => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { passwords, folders } = useShareNotif();
 
   const menuItems = [
@@ -72,6 +73,8 @@ const Sidebar = ({
           `sidebar-item ${isActive ? 'active' : ''}`
         }
         onClick={handleMenuClick}
+        data-label={item.label}
+        aria-label={item.label}
       >
         <span
           className="sidebar-item-icon"
@@ -126,11 +129,7 @@ const Sidebar = ({
       <aside className={sidebarClass}>
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">
-            <img
-              src={logo}
-              alt="CRED 360"
-              className="sidebar-logo-img"
-            />
+            <KeyShareLogo size={32} className="sidebar-logo-img" />
           </div>
 
           <span className="sidebar-logo-text">
@@ -160,6 +159,9 @@ const Sidebar = ({
         </nav>
 
         <div className="sidebar-footer">
+          <button className="sidebar-logout" onClick={logout} title="Log out" aria-label="Log out">
+            <RiLogoutBoxLine size={18} />
+          </button>
           <div className="sidebar-user-info">
             <div
               className="user-avatar"

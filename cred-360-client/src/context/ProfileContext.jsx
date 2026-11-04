@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 
 const ProfileContext = createContext(null);
 const API = '/server/cred_360_function';

@@ -1,0 +1,220 @@
+/* ── Themed checkboxes (follow the active theme everywhere) ───────────────── */
+input[type="checkbox"]:not(.form-check-input) {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin: 0;
+  display: inline-grid;
+  place-content: center;
+  vertical-align: middle;
+  border: 1.5px solid var(--border-strong, #94a3b8);
+  border-radius: 5px;
+  background: var(--card-bg, #fff);
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+input[type="checkbox"]:not(.form-check-input):hover:not(:disabled) { border-color: var(--primary); }
+input[type="checkbox"]:not(.form-check-input):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb, 47, 158, 118), 0.28);
+}
+input[type="checkbox"]:not(.form-check-input):checked,
+input[type="checkbox"]:not(.form-check-input):indeterminate {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+input[type="checkbox"]:not(.form-check-input)::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  transform: scale(0);
+  transition: transform .12s ease;
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 59%, 40% 100%, 100% 17%, 85% 3%, 39% 69%);
+}
+input[type="checkbox"]:not(.form-check-input):checked::after { transform: scale(1); }
+input[type="checkbox"]:not(.form-check-input):indeterminate::after {
+  transform: scale(1);
+  clip-path: none;
+  height: 2px;
+  width: 10px;
+  border-radius: 2px;
+}
+input[type="checkbox"]:not(.form-check-input):disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── DataTable ─────────────────────────────────────────────────────────────── */
+.dt {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.dt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.dt-toolbar-end { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+.dt-search {
+  position: relative;
+  flex: 1 1 220px;
+  max-width: 340px;
+  min-width: 160px;
+}
+.dt-search input {
+  width: 100%;
+  height: 38px;
+  padding: 0 32px 0 36px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.dt-search input:focus {
+  background: var(--card-bg);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb, 47, 158, 118), .16);
+}
+.dt-search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.dt-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 20px; height: 20px;
+  border: 0; border-radius: 50%; background: var(--bg-tertiary); color: var(--text-secondary); cursor: pointer;
+}
+
+.dt-select, .dt-size {
+  height: 38px;
+  padding: 0 28px 0 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+  cursor: pointer;
+}
+.dt-select:focus, .dt-size:focus { border-color: var(--primary); }
+.dt-size { height: 30px; border-radius: 8px; margin-left: 12px; padding: 0 22px 0 8px; }
+
+.dt-dates {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 38px; padding: 0 10px;
+  font-size: 12.5px; color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.dt-dates:focus-within { border-color: var(--primary); }
+.dt-dates-icon { color: var(--text-muted); }
+.dt-dates input[type="date"] {
+  border: 0; background: transparent; outline: none;
+  font-size: 13px; color: var(--text-primary); font-family: inherit; width: 118px;
+  color-scheme: light;
+}
+[data-theme="dark"] .dt-dates input[type="date"] { color-scheme: dark; }
+
+.dt-icon-btn {
+  display: grid; place-items: center; width: 38px; height: 38px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.dt-icon-btn:hover { color: var(--primary); border-color: var(--primary); background: var(--card-bg); }
+.dt-link {
+  border: 0; background: transparent; color: var(--primary);
+  font-size: 13px; font-weight: 500; cursor: pointer; padding: 4px 6px; border-radius: 6px;
+}
+.dt-link:hover { background: rgba(var(--primary-rgb, 47, 158, 118), .1); }
+.dt-spin { animation: dt-spin .8s linear infinite; }
+@keyframes dt-spin { to { transform: rotate(360deg); } }
+
+.dt-bulk {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; font-size: 13px; color: var(--text-primary);
+  background: rgba(var(--primary-rgb, 47, 158, 118), .09);
+  border-bottom: 1px solid var(--border);
+}
+
+.dt-scroll { overflow-x: auto; }
+.dt-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+.dt-table thead th {
+  position: sticky; top: 0;
+  padding: 11px 16px; text-align: left;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.dt-th { display: inline-flex; align-items: center; gap: 4px; }
+.dt-sortable { cursor: pointer; user-select: none; }
+.dt-sortable:hover { color: var(--text-primary); }
+.dt-sort { display: inline-flex; opacity: 0; transition: opacity .15s; }
+.dt-sortable:hover .dt-sort, .dt-sort.on { opacity: 1; color: var(--primary); }
+
+.dt-table tbody td {
+  padding: 12px 16px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.dt-table tbody tr:last-child td { border-bottom: 0; }
+.dt-table tbody tr:hover td { background: var(--bg-secondary); }
+.dt-clickable { cursor: pointer; }
+.dt-selected td, .dt-table tbody tr.dt-selected:hover td { background: rgba(var(--primary-rgb, 47, 158, 118), .09); }
+.dt-check-col { width: 44px; padding-right: 0 !important; }
+.dt-busy { opacity: .55; transition: opacity .15s; }
+
+.dt-skel-bar {
+  display: block; height: 12px; width: 70%; border-radius: 6px;
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-secondary) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%; animation: dt-shimmer 1.2s infinite;
+}
+@keyframes dt-shimmer { to { background-position: -200% 0; } }
+
+.dt-empty { padding: 0 !important; }
+.dt-empty-inner {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 44px 16px; color: var(--text-muted); font-size: 14px;
+}
+.dt-empty-inner p { margin: 0; }
+
+.dt-pagination {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  font-size: 13px; color: var(--text-secondary);
+}
+.dt-page-info b { color: var(--text-primary); font-weight: 600; }
+.dt-pager { display: flex; align-items: center; gap: 4px; }
+.dt-pbtn {
+  min-width: 32px; height: 32px; padding: 0 8px;
+  display: inline-grid; place-items: center;
+  font-size: 13px; color: var(--text-secondary);
+  background: transparent; border: 1px solid transparent; border-radius: 8px; cursor: pointer;
+}
+.dt-pbtn:hover:not(:disabled) { background: var(--bg-secondary); border-color: var(--border); color: var(--text-primary); }
+.dt-pbtn.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.dt-pbtn:disabled { opacity: .4; cursor: not-allowed; }
+.dt-ellipsis { padding: 0 4px; color: var(--text-muted); }
+
+@media (max-width: 768px) {
+  .dt-toolbar { padding: 12px; }
+  .dt-search { max-width: none; flex-basis: 100%; }
+  .dt-select { flex: 1 1 120px; }
+  .dt-dates { flex: 1 1 100%; justify-content: space-between; }
+  .dt-dates input[type="date"] { width: auto; flex: 1; min-width: 0; }
+  .dt-toolbar-end { margin-left: 0; width: 100%; justify-content: flex-end; }
+  .dt-pagination { justify-content: center; }
+  .dt-table thead th, .dt-table tbody td { padding: 10px 12px; }
+}

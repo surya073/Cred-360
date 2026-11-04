@@ -6,6 +6,7 @@ import { useNavbar } from '../context/NavbarContext';
 import NotificationPanel from './NotificationPanel';
 import GlobalSearch from './GlobalSearch';
 import Tooltip from './Tooltip';
+import KeyShareLogo from './KeyShareLogo';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   RiSunLine, RiMoonLine,
@@ -112,6 +113,11 @@ const Navbar = ({ collapsed, onToggleSidebar }) => {
       {/* ── Left ── */}
       <div className="navbar-left" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
 
+        <div className="navbar-brand">
+          <KeyShareLogo size={30} />
+          <span>CRED 360</span>
+        </div>
+
         <Tooltip label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
           <button className="nav-icon-btn" onClick={onToggleSidebar} aria-label="Toggle sidebar">
             {collapsed ? <RiMenuLine size={18} /> : <RiMenuFoldLine size={18} />}
@@ -156,19 +162,18 @@ const Navbar = ({ collapsed, onToggleSidebar }) => {
       {/* ── Right ── */}
       <div className="navbar-right">
 
-      <Tooltip label="Search (Ctrl+K)">
-          <div
-            className="navbar-search-pill"
-            role="button"
-            tabIndex={0}
-            onClick={() => setSearchOpen(true)}
-            onKeyDown={(e) => e.key === 'Enter' && setSearchOpen(true)}
-          >
-            <RiSearchLine size={14} />
-            <span>Search...</span>
-            <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.5 }}>⌘K</span>
-          </div>
-        </Tooltip>
+        <div
+          className="navbar-search-pill"
+          role="button"
+          tabIndex={0}
+          title="Search (Ctrl+K)"
+          onClick={() => setSearchOpen(true)}
+          onKeyDown={(e) => e.key === 'Enter' && setSearchOpen(true)}
+        >
+          <RiSearchLine size={14} />
+          <span>Search...</span>
+          <span style={{ marginLeft: 'auto', fontSize: '10px', opacity: 0.5 }}>⌘K</span>
+        </div>
 
         <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 
@@ -193,6 +198,8 @@ const Navbar = ({ collapsed, onToggleSidebar }) => {
         </div>
 
         <div className="navbar-sep" />
+
+        <span className="navbar-hi">Hi, {user?.first_name || 'there'}!</span>
 
         <div className="dropdown-wrapper" ref={dropdownRef}>
           <Tooltip label="Account">

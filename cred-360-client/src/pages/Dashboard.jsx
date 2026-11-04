@@ -2,16 +2,15 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCountUp } from '../hooks/useCountUp';
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import {
-  RiKeyLine, RiShareLine, RiTimeLine, RiTeamLine,
-  RiFolderLine, RiShieldKeyholeLine, RiRefreshLine,
-  RiUserLine, RiCloseLine,
+  RiKeyLine, RiShareLine, RiTeamLine, RiFolderLine, RiUserLine,
+  RiShieldKeyholeLine, RiRefreshLine, RiCloseLine, RiArrowRightSLine, RiAddLine,
 } from 'react-icons/ri';
-import axios from 'axios';
+import axios from '../services/api';
 import ExpiryAlert from '../components/ExpiryAlert';
 
 const API = '/server/cred_360_function';
@@ -25,7 +24,6 @@ const COLORS = {
   users:     '#0284c7',
 };
 const DONUT_COLORS  = ['#c31b88', '#16a34a', '#efb71f'];
-const HEALTH_COLORS = ['#16a34a', '#d97706', '#dc2626'];
 const TEAM_COLORS   = ['#2563eb', '#7c3aed', '#16a34a', '#d97706', '#0284c7'];
 const SEVERITY_STYLE = {
   high:   { color: '#dc2626', bg: 'var(--danger-bg)' },
@@ -179,84 +177,6 @@ const OffcanvasContent = ({ type, stats, recentPasswords, shareTypeData, healthD
   return null;
 };
 
-/* ── Stat card ── */
-const StatCard = ({ icon, label, value, color, onClick, trend }) => {
-  const animatedValue = useCountUp(value);
-  return (
-    <div className="stat-card" onClick={onClick} style={{ cursor: 'pointer' }}>
-      <div className="stat-icon" style={{ background: color + '18', color }}>
-        {icon}
-      </div>
-      <div className="stat-info">
-        <div className="stat-value">{animatedValue}</div>
-        <div className="stat-label">{label}</div>
-        {trend != null && (
-          <div className={`stat-trend ${trend >= 0 ? 'trend-up' : 'trend-dn'}`}>
-            {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}% vs last month
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-/* ── Chart tooltip ── */
-const CustomTooltip = ({ active, payload, label }) => {
-  if (active && payload?.length) return (
-    <div className="chart-tooltip">
-      <p className="chart-tooltip-label">{label}</p>
-      <p className="chart-tooltip-value">{payload[0].value}</p>
-    </div>
-  );
-  return null;
-};
-
-/* ── Health ring ── */
-const HealthRing = ({ score, strongPct, moderatePct, weakPct }) => {
-  const r = 52, circ = 2 * Math.PI * r;
-  const segments = [
-    { pct: strongPct   / 100, color: HEALTH_COLORS[0] },
-    { pct: moderatePct / 100, color: HEALTH_COLORS[1] },
-    { pct: weakPct     / 100, color: HEALTH_COLORS[2] },
-  ];
-  let offset = 0;
-  return (
-    <svg viewBox="0 0 120 120" width="120" height="120" style={{ flexShrink: 0 }}>
-      <circle cx="60" cy="60" r={r} fill="none" stroke="var(--bg-tertiary)" strokeWidth="10" />
-      {segments.map((s, i) => {
-        const dash   = s.pct * circ;
-        const gap    = circ - dash;
-        const rotate = offset * 360 - 90;
-        offset += s.pct;
-        return (
-          <circle key={i} cx="60" cy="60" r={r} fill="none"
-            stroke={s.color} strokeWidth="10"
-            strokeDasharray={`${dash} ${gap}`} strokeLinecap="round"
-            style={{
-              transform: `rotate(${rotate}deg)`,
-              transformOrigin: '60px 60px',
-              transition: 'stroke-dasharray 0.6s ease',
-            }}
-          />
-        );
-      })}
-      <text x="60" y="55" textAnchor="middle" fontSize="18" fontWeight="500" fill="var(--text-primary)">{score}</text>
-      <text x="60" y="70" textAnchor="middle" fontSize="9" fill="var(--text-muted)">health score</text>
-    </svg>
-  );
-};
-
-/* ── Mini bar ── */
-const MiniBar = ({ label, value, max, color }) => (
-  <div className="mini-bar-row">
-    <span className="mini-bar-label">{label}</span>
-    <div className="mini-bar-track">
-      <div className="mini-bar-fill" style={{ width: `${(value / Math.max(max, 1)) * 100}%`, background: color }} />
-    </div>
-    <span className="mini-bar-val">{value}</span>
-  </div>
-);
-
 /* ── Security posture ── */
 const SecurityPosture = ({ recommendations, onAction }) => {
   if (!recommendations?.length) return (
@@ -313,6 +233,8 @@ const Dashboard = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [loading,         setLoading]         = useState(true);
   const [offcanvas,       setOffcanvas]       = useState(null);
+  const [pill,            setPill]            = useState('all');
+  const [hoverIdx,        setHoverIdx]        = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -361,46 +283,53 @@ const Dashboard = () => {
   const openCard  = (type, title, color) => setOffcanvas({ type, title, color });
   const closeCard = useCallback(() => setOffcanvas(null), []);
 
-  // ── Health ring: convert counts to real percentages ──
-  const healthTotal = (healthData.strong + healthData.moderate + healthData.weak) || 1;
-  const strongPct   = (healthData.strong   / healthTotal) * 100;
-  const moderatePct = (healthData.moderate / healthTotal) * 100;
-  const weakPct     = (healthData.weak     / healthTotal) * 100;
-
   // ── Monthly chart: check if all zeros ──
   const hasMonthlyData = monthlyData.some(d => d.Passwords > 0);
 
-  const teamMax = teamData.length ? Math.max(...teamData.map(t => t.count), 1) : 1;
+  const animPw  = useCountUp(stats.totalPasswords);
+  const animExp = useCountUp(stats.expiredShares);
 
-  const statCards = [
-    { type: 'passwords', icon: <RiKeyLine size={20} />,    label: 'Total passwords',  value: stats.totalPasswords,  color: COLORS.passwords, trend: stats.passwordDelta },
-    { type: 'shared',    icon: <RiShareLine size={20} />,  label: 'Shared passwords', value: stats.sharedPasswords, color: COLORS.shared    },
-    { type: 'expired',   icon: <RiTimeLine size={20} />,   label: 'Expired shares',   value: stats.expiredShares,   color: COLORS.expired   },
-    { type: 'teams',     icon: <RiTeamLine size={20} />,   label: 'Teams',            value: stats.totalTeams,      color: COLORS.teams     },
-    { type: 'folders',   icon: <RiFolderLine size={20} />, label: 'Folders',          value: stats.totalFolders,    color: COLORS.folders   },
-    { type: 'users',     icon: <RiUserLine size={20} />,   label: 'Total users',      value: stats.totalUsers,      color: COLORS.users     },
+  const total = (shareTypeData || []).reduce((a, d) => a + (d.value || 0), 0);
+  const NX_DONUT = ['#8b7cf6', '#d4f56b', '#3fb58a'];
+  const PILLS = [
+    { key: 'all',      label: 'All' },
+    { key: 'strong',   label: 'Strong' },
+    { key: 'moderate', label: 'Moderate' },
+    { key: 'weak',     label: 'Weak' },
   ];
+  const listed = recentPasswords.filter(p => pill === 'all' || p.strength === pill).slice(0, 6);
+  const activeIdx = hoverIdx != null ? hoverIdx : monthlyData.length - 1;
+
+  const NxBar = (props) => {
+    const { x, y, width, height, index, value } = props;
+    const isActive = index === activeIdx;
+    const h = Math.max(height, 74);
+    const yy = y + height - h;
+    const r = Math.min(width / 2, h / 2);
+    return (
+      <g onMouseEnter={() => setHoverIdx(index)} onMouseLeave={() => setHoverIdx(null)} style={{ cursor: 'pointer' }}>
+        <rect x={x} y={yy} width={width} height={h} rx={r} style={{ fill: isActive ? '#8b7cf6' : 'var(--nx-bar)' }} />
+        {!isActive && <rect x={x} y={yy} width={width} height={h} rx={r} fill="url(#nxHatch)" />}
+        {isActive && (
+          <>
+            <circle cx={x + width / 2} cy={yy + 14} r={7} fill="none" stroke="#fff" strokeWidth={3} />
+            <rect x={x + width / 2 - 30} y={yy - 32} width={60} height={24} rx={12} fill="#2a3a36" />
+            <text x={x + width / 2} y={yy - 16} textAnchor="middle" fontSize={11} fill="#e8f5ef">+{value}</text>
+          </>
+        )}
+      </g>
+    );
+  };
 
   if (loading) return (
-    <div>
-      <div className="page-header flex-between">
-        <div><h1 className="page-title">Dashboard</h1><p className="page-subtitle">Loading your overview…</p></div>
-      </div>
-      <div className="dashboard-skeleton">
-        {[...Array(6)].map((_, i) => <div key={i} className="skeleton-card" />)}
-      </div>
-      <div className="skeleton-card" style={{ height: 240, marginBottom: 14 }} />
-      <div className="dashboard-charts-row2">
-        <div className="skeleton-card" style={{ height: 200 }} />
-        <div className="skeleton-card" style={{ height: 200 }} />
-      </div>
-      <div className="skeleton-card" style={{ height: 260 }} />
+    <div className="nx-dash">
+      <div className="nx-skel" style={{ height: 60, marginBottom: 20 }} />
+      <div className="nx-skel" style={{ height: 420 }} />
     </div>
   );
 
   return (
     <div>
-      {/* ── Offcanvas ── */}
       <Offcanvas open={!!offcanvas} onClose={closeCard} title={offcanvas?.title} color={offcanvas?.color}>
         {offcanvas && (
           <OffcanvasContent
@@ -414,201 +343,177 @@ const Dashboard = () => {
         )}
       </Offcanvas>
 
-      {/* ── Header ── */}
-      <div className="page-header flex-between">
-        <div>
-          <h1 className="page-title">{getGreeting()}, {user?.first_name || 'User'}</h1>
-          <p className="page-subtitle">Here is your CRED 360 security overview</p>
-        </div>
-        <button className="btn btn-secondary" onClick={fetchData}>
-          <RiRefreshLine size={15} />
-        </button>
-      </div>
       <ExpiryAlert />
 
-      {/* ── Security posture ── */}
-      <SecurityPosture recommendations={recommendations} onAction={navigate} />
-
-      {/* ── Stat cards ── */}
-      <div className="stats-grid stagger-in">
-        {statCards.map((card) => (
-          <StatCard
-            key={card.type}
-            {...card}
-            onClick={() => openCard(card.type, card.label, card.color)}
-          />
-        ))}
-      </div>
-
-      {/* ── Row 1: Monthly + Share types ── */}
-      <div className="dashboard-charts-row" style={{ marginBottom: 14 }}>
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Monthly password activity</h2>
-            <span className="card-sub">Last 6 months</span>
-          </div>
-         {hasMonthlyData ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={monthlyData} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="waveFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%"  stopColor="var(--primary)" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="Passwords"
-                  stroke="var(--primary)"
-                  strokeWidth={2.5}
-                  fill="url(#waveFill)"
-                  dot={{ r: 3, fill: 'var(--primary)', strokeWidth: 0 }}
-                  activeDot={{ r: 5, fill: 'var(--primary)', stroke: 'var(--bg-primary)', strokeWidth: 2 }}
-                  animationDuration={900}
-                  animationEasing="ease-out"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="empty-state" style={{ height: 200 }}>
-              <RiKeyLine size={32} />
-              <p>No passwords added yet</p>
+      <div className="nx-dash">
+        <div className="nx-grid">
+          {/* ── Left column ── */}
+          <div className="nx-left">
+            <div className="nx-head">
+              <h1 className="nx-title">My Dashboard</h1>
+              <button className="nx-refresh" onClick={fetchData} title="Refresh"><RiRefreshLine size={16} /></button>
             </div>
-          )}
-        </div>
+            <p className="nx-greet">{getGreeting()}, {user?.first_name || 'User'}</p>
 
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Share types</h2>
-          </div>
-          {shareTypeData.length === 0 || shareTypeData.every(d => d.value === 0) ? (
-            <div className="empty-state"><RiShareLine size={32} /><p>No shares yet</p></div>
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={150}>
-                <PieChart>
-                  <Pie data={shareTypeData} cx="50%" cy="50%" innerRadius={42} outerRadius={65} dataKey="value" paddingAngle={3}>
-                    {shareTypeData.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="chart-legend">
-                {shareTypeData.map((item, i) => (
-                  <div className="legend-item" key={i}>
-                    <span className="legend-dot" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
-                    <span className="legend-label">{item.name}</span>
-                    <span className="legend-value">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ── Row 2: Health + Team activity ── */}
-      <div className="dashboard-charts-row2" style={{ marginBottom: 14 }}>
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Password health</h2>
-            <span className="card-sub">Strength breakdown</span>
-          </div>
-          {stats.totalPasswords === 0 ? (
-            <div className="empty-state">
-              <RiShieldKeyholeLine size={32} />
-              <p>No passwords to analyse yet</p>
-            </div>
-          ) : (
-            <div className="health-row">
-              <HealthRing
-                score={healthData.score}
-                strongPct={strongPct}
-                moderatePct={moderatePct}
-                weakPct={weakPct}
-              />
-              <div className="health-bars">
-                <MiniBar label="Strong"   value={healthData.strong}   max={stats.totalPasswords} color={HEALTH_COLORS[0]} />
-                <MiniBar label="Moderate" value={healthData.moderate} max={stats.totalPasswords} color={HEALTH_COLORS[1]} />
-                <MiniBar label="Weak"     value={healthData.weak}     max={stats.totalPasswords} color={HEALTH_COLORS[2]} />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">Team activity</h2>
-            <span className="card-sub">Passwords per team</span>
-          </div>
-          {teamData.length === 0 ? (
-            <div className="empty-state"><RiTeamLine size={32} /><p>No team data yet</p></div>
-          ) : (
-            <div className="team-bars">
-              {teamData.map((t, i) => (
-                <MiniBar key={i} label={t.name} value={t.count} max={teamMax} color={TEAM_COLORS[i % TEAM_COLORS.length]} />
+            <div className="nx-pills">
+              {PILLS.map(p => (
+                <button key={p.key} className={`nx-pill ${pill === p.key ? 'on' : ''}`} onClick={() => setPill(p.key)}>
+                  {p.label}
+                </button>
               ))}
             </div>
-          )}
+
+            {/* Compact stat strip */}
+            <div className="nx-chips">
+              {[
+                { type: 'shared',  icon: <RiShareLine size={16} />,  label: 'Shared',  value: stats.sharedPasswords, color: COLORS.shared },
+                { type: 'teams',   icon: <RiTeamLine size={16} />,   label: 'Teams',   value: stats.totalTeams,      color: COLORS.teams },
+                { type: 'folders', icon: <RiFolderLine size={16} />, label: 'Folders', value: stats.totalFolders,    color: COLORS.folders },
+                { type: 'users',   icon: <RiUserLine size={16} />,   label: 'Users',   value: stats.totalUsers,      color: COLORS.users },
+              ].map(c => (
+                <button key={c.type} className="nx-chip" onClick={() => openCard(c.type, c.label, c.color)}>
+                  <span className="nx-chip-ic" style={{ color: c.color }}>{c.icon}</span>
+                  <b>{c.value}</b>
+                  <span>{c.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Activity bar chart */}
+            <div className="nx-card nx-flow">
+              <div className="nx-card-head">
+                <h2>Password Activity</h2>
+                <button className="nx-link" onClick={() => navigate('/passwords')}>View All <RiArrowRightSLine /></button>
+              </div>
+              {hasMonthlyData ? (
+                <ResponsiveContainer width="100%" height={185}>
+                  <BarChart data={monthlyData} margin={{ top: 40, right: 8, left: -14, bottom: 0 }} barCategoryGap="24%">
+                    <defs>
+                      <pattern id="nxHatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                        <line x1="0" y1="0" x2="0" y2="7" stroke="#8b7cf6" strokeWidth="2.4" />
+                      </pattern>
+                    </defs>
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Bar dataKey="Passwords" shape={<NxBar />} maxBarSize={52} isAnimationActive={false} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="nx-empty" style={{ height: 185 }}><RiKeyLine size={30} /><p>No passwords added yet</p></div>
+              )}
+            </div>
+
+            {/* Bottom row */}
+            <div className="nx-bottom">
+              <div className="nx-card nx-avail">
+                <div className="nx-card-head">
+                  <h2>Shares</h2>
+                  <button className="nx-link" onClick={() => navigate('/shares')}>View All <RiArrowRightSLine /></button>
+                </div>
+                {total === 0 ? (
+                  <div className="nx-empty"><RiShareLine size={28} /><p>No shares yet</p></div>
+                ) : (
+                  <div className="nx-donut-row">
+                    <div className="nx-donut">
+                      <PieChart width={140} height={140}>
+                        <Pie data={shareTypeData} dataKey="value" cx={70} cy={70} innerRadius={48} outerRadius={68} paddingAngle={4}
+                             cornerRadius={10} stroke="none" startAngle={90} endAngle={-270} isAnimationActive={false}>
+                          {shareTypeData.map((_, i) => <Cell key={i} fill={NX_DONUT[i % NX_DONUT.length]} />)}
+                        </Pie>
+                      </PieChart>
+                      <div className="nx-donut-c"><b>{total}</b><span>Total Shares</span></div>
+                    </div>
+                    <div className="nx-legend">
+                      {shareTypeData.map((d, i) => (
+                        <div key={i}><i style={{ background: NX_DONUT[i % NX_DONUT.length] }} /><div><span>{d.name}</span><b>{d.value}</b></div></div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="nx-stack">
+                <div className="nx-card nx-stat" onClick={() => openCard('passwords', 'Total passwords', COLORS.passwords)}>
+                  <div className="nx-card-head"><h2>Passwords</h2><span className="nx-dots">···</span></div>
+                  <div className="nx-big">{animPw}</div>
+                  <div className="nx-stat-foot">
+                    <span>Stored in your vault</span>
+                    <em className="nx-badge g">{stats.passwordDelta >= 0 ? '+' : ''}{stats.passwordDelta || 0}%</em>
+                  </div>
+                </div>
+                <div className="nx-card nx-stat" onClick={() => openCard('expired', 'Expired shares', COLORS.expired)}>
+                  <div className="nx-card-head"><h2>Expired</h2><span className="nx-dots">···</span></div>
+                  <div className="nx-big">{animExp}</div>
+                  <div className="nx-stat-foot">
+                    <span>Shares past expiry</span>
+                    <em className="nx-badge p">{stats.sharedPasswords - stats.expiredShares} active</em>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Right panel ── */}
+          <aside className="nx-right">
+            <div className="nx-card nx-mycard">
+              <div className="nx-card-head">
+                <h2>Vault Health</h2>
+                <button className="nx-link" onClick={() => navigate('/passwords')}>View All <RiArrowRightSLine /></button>
+              </div>
+              <div className="nx-cardstack">
+                <div className="nx-c3" /><div className="nx-c2" />
+                <div className="nx-c1">
+                  <button className="nx-plus" onClick={() => navigate('/passwords')} title="Add password"><RiAddLine size={20} /></button>
+                  <span className="nx-lbl">Health Score</span>
+                  <strong>{healthData.score}<small>/100</small></strong>
+                </div>
+              </div>
+
+              <div className="nx-glass">
+                <div className="nx-meta">
+                  <span>{healthData.strong} strong · {healthData.moderate} moderate · {healthData.weak} weak</span>
+                  <span>{stats.totalPasswords} passwords</span>
+                </div>
+                <div className="nx-card-head nx-tx-head">
+                  <h2>Recent Passwords</h2>
+                  <button className="nx-link" onClick={() => navigate('/passwords')}>View All <RiArrowRightSLine /></button>
+                </div>
+                {listed.length === 0 ? (
+                  <p className="nx-none">Nothing in this filter</p>
+                ) : listed.map((p, i) => (
+                  <div className="nx-tx" key={i}>
+                    <span className="nx-ava" style={{ background: ['#1f6f5a', '#2a7a63', '#b4561f', '#4a4aa6'][i % 4] }}>
+                      {(p.name || '?').charAt(0).toUpperCase()}
+                    </span>
+                    <span className="nx-tx-name">{p.name}</span>
+                    <span className={`nx-tx-st ${p.strength || ''}`}>{p.strength || '—'}</span>
+                  </div>
+                ))}
+
+                <div className="nx-tiles">
+                  <div className="nx-tile nx-teams" onClick={() => navigate('/teams')}>
+                    <b>Teams</b>
+                    <p>{stats.totalTeams} teams · {stats.totalUsers} users in your organization</p>
+                    <div className="nx-avs">
+                      {[...Array(Math.min(stats.totalTeams || 1, 3))].map((_, i) => (
+                        <span key={i} style={{ background: ['#8b7cf6', '#d4f56b', '#3fb58a'][i] }}><RiTeamLine size={13} /></span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="nx-tile nx-wave" onClick={() => navigate('/folders')}>
+                    <b>Folders · {stats.totalFolders}</b>
+                    <svg viewBox="0 0 120 60" preserveAspectRatio="none">
+                      <path d="M2 18 C 14 18, 14 52, 28 52 S 42 18, 56 18 S 70 52, 84 52 S 98 18, 118 18" fill="none" stroke="#3fb58a" strokeWidth="5" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
 
-      {/* ── Recent passwords ── */}
-      <div className="card">
-        <div className="card-header">
-          <h2 className="card-title">Recent passwords</h2>
-          <span className="card-sub">Latest 6 entries</span>
-        </div>
-        {recentPasswords.length === 0 ? (
-          <div className="empty-state"><RiShieldKeyholeLine size={36} /><p>No passwords added yet</p></div>
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Category</th>
-                  <th>Username</th>
-                  <th>URL</th>
-                  <th>Strength</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentPasswords.map((p, i) => (
-                  <tr key={i}>
-                    <td className="td-bold">{p.name}</td>
-                    <td><span className="badge badge-info">{p.category || 'General'}</span></td>
-                    <td className="td-muted">{p.username || '—'}</td>
-                    <td className="td-muted">
-                      {p.url ? (
-                        <a
-                          href={p.url.startsWith('http') ? p.url : `https://${p.url}`}
-                          target="_blank" rel="noreferrer" className="td-link"
-                        >
-                          {p.url.replace(/^https?:\/\//, '').slice(0, 22)}
-                        </a>
-                      ) : '—'}
-                    </td>
-                    <td>
-                      {p.strength === 'strong'   && <span className="badge badge-success">Strong</span>}
-                      {p.strength === 'moderate' && <span className="badge badge-warning">Moderate</span>}
-                      {p.strength === 'weak'     && <span className="badge badge-danger">Weak</span>}
-                      {!p.strength && '—'}
-                    </td>
-                    <td className="td-muted">
-                      {p.created_time ? new Date(p.created_time).toLocaleDateString() : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <SecurityPosture recommendations={recommendations} onAction={navigate} />
     </div>
   );
 };

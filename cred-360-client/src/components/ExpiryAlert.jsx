@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import { RiTimeLine, RiAlarmWarningLine, RiCloseLine } from 'react-icons/ri';
 

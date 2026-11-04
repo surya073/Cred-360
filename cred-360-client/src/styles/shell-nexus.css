@@ -1,0 +1,205 @@
+/* ════════════════════════════════════════════════════════════
+   Shell restyle — dark-green glass (NexusBank reference).
+   Loaded LAST. Desktop: floating icon rail + top bar with logo,
+   wide search and greeting. <1025px keeps the existing drawer.
+════════════════════════════════════════════════════════════ */
+
+/* ── Dark tokens: blue → green ───────────────────────────── */
+[data-theme="dark"] {
+  --primary:       #3fb58a;
+  --primary-dark:  #2c8f6c;
+  --primary-light: rgba(63, 181, 138, 0.16);
+  --primary-rgb:   63 181 138;
+
+  --bg-primary:       #141c1a;
+  --bg-primary-rgb:   20 28 26;
+  --bg-secondary:     #0b0f0e;
+  --bg-tertiary:      #1a2321;
+  --text-primary:     #eaf3ef;
+  --text-secondary:   #b4c8c0;
+  --text-muted:       #8aa39b;
+  --border:           rgba(255, 255, 255, 0.08);
+  --border-hover:     rgba(255, 255, 255, 0.18);
+  --border-strong:    rgba(255, 255, 255, 0.22);
+
+  --info: #5ecfa4; --info-bg: rgba(94, 207, 164, 0.12);
+
+  --glass-bg:     rgba(26, 35, 33, 0.72);
+  --glass-bg-2:   rgba(22, 30, 28, 0.86);
+  --glass-line:   rgba(255, 255, 255, 0.07);
+  --glass-shadow: 0 14px 44px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,.05);
+  --page-bg:
+    radial-gradient(ellipse 55% 50% at 85% 40%, rgba(30, 110, 85, .45), transparent 65%),
+    radial-gradient(ellipse 45% 40% at 0% 100%, rgba(20, 70, 55, .35), transparent 70%),
+    #0b0f0e;
+}
+[data-theme="dark"] .btn-primary {
+  background: linear-gradient(135deg, #3fb58a 0%, #2c8f6c 100%);
+  color: #06201a;
+  box-shadow: 0 6px 20px rgba(63, 181, 138, 0.3), inset 0 1px 0 rgba(255,255,255,.2);
+}
+[data-theme="dark"] .btn-primary:hover {
+  background: linear-gradient(135deg, #4cc89c 0%, #34a07b 100%);
+  box-shadow: 0 8px 26px rgba(63, 181, 138, 0.45);
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: rgba(120, 200, 170, 0.25); background-clip: content-box; }
+[data-theme="dark"] option { background: #141c1a; color: #eaf3ef; }
+[data-theme="dark"] .form-input,
+[data-theme="dark"] .search-input,
+[data-theme="dark"] .filter-select,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea { background: rgba(10, 16, 14, 0.6); }
+
+/* ── Light tokens: blue → green ──────────────────────────── */
+[data-theme="light"] {
+  --primary:       #2f9e76;
+  --primary-dark:  #247a5b;
+  --primary-light: #d9f1e7;
+  --primary-rgb:   47 158 118;
+  --bg-secondary:  #eaf3ee;
+  --bg-tertiary:   #dcebe3;
+  --text-primary:  #0f2a22;
+  --text-secondary:#3f5e53;
+  --text-muted:    #5f7a70;
+  --border:        rgba(15, 60, 45, 0.12);
+  --info: #2f9e76; --info-bg: rgba(47, 158, 118, 0.12);
+  --page-bg:
+    radial-gradient(ellipse 60% 50% at 8% 0%, rgba(63,181,138,.22), transparent 60%),
+    radial-gradient(ellipse 50% 45% at 100% 100%, rgba(63,181,138,.14), transparent 60%),
+    #ecf5f0;
+}
+[data-theme="light"] .btn-primary {
+  background: linear-gradient(135deg, #3fb58a 0%, #2c8f6c 100%);
+  box-shadow: 0 6px 18px rgba(47, 158, 118, 0.3), inset 0 1px 0 rgba(255,255,255,.25);
+}
+[data-theme="light"] .navbar-brand img {
+  filter: brightness(0) saturate(100%) invert(48%) sepia(55%) saturate(600%) hue-rotate(112deg) brightness(.85);
+}
+
+/* brand + greeting only exist on desktop */
+.navbar-brand, .navbar-hi, .sidebar-logout { display: none; }
+
+@media (min-width: 769px) {
+  :root { --sidebar-width: 76px; --navbar-height: 64px; --gap: 16px; }
+
+  /* ── Icon rail ─────────────────────────────────────────── */
+  .sidebar,
+  .sidebar.collapsed,
+  [data-theme="dark"] .sidebar {
+    top: calc(var(--navbar-height) + var(--gap));
+    left: var(--gap);
+    bottom: var(--gap);
+    height: auto;
+    width: 76px;
+    border-radius: 38px;
+    padding: 14px 0;
+    background: rgba(26, 35, 33, 0.8);
+    border: 1px solid var(--glass-line);
+  }
+  [data-theme="light"] .sidebar { background: rgba(255, 255, 255, 0.85); }
+
+  .sidebar-logo,
+  .sidebar-user-info,
+  .sidebar-item-label { display: none; }
+  .sidebar-nav { padding: 0; overflow: visible; align-items: center; gap: 6px; flex: 0 1 auto; }
+  .sidebar-section-label {
+    display: block; width: 36px; height: 1px; padding: 0; margin: 8px auto !important;
+    font-size: 0; background: var(--glass-line); border: 0;
+  }
+  .sidebar-section-label:first-child { display: none; }
+
+  .sidebar-item,
+  .sidebar.collapsed .sidebar-item {
+    width: 46px; height: 46px; padding: 0; margin: 0 auto;
+    display: grid; place-items: center;
+    border-radius: 50%; border: 0;
+    color: #8aa39b; background: transparent;
+  }
+  .sidebar-item::before, .sidebar-item::after,
+  .sidebar-item.active::after, .sidebar-item.active::before { display: none; }
+  .sidebar-item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+  [data-theme="light"] .sidebar-item { color: #4a6a5e; }
+  [data-theme="light"] .sidebar-item:hover { background: rgba(47, 158, 118, 0.12); color: #0f2a22; }
+  [data-theme="light"] .sidebar-item.active {
+    background: #0f2a22; color: #fff; border: 0;
+    box-shadow: 0 6px 16px rgba(15, 42, 34, 0.3);
+  }
+  [data-theme="light"] .sidebar-item.active .sidebar-item-icon { color: #fff; }
+  [data-theme="light"] .sidebar-logout { color: #4a6a5e; background: rgba(47, 158, 118, 0.08); border-color: rgba(15, 60, 45, 0.12); }
+  [data-theme="light"] .sidebar-logout:hover { color: #0f2a22; background: rgba(47, 158, 118, 0.18); border-color: rgba(15, 60, 45, 0.25); }
+  [data-theme="light"] .sidebar-section-label { background: rgba(15, 60, 45, 0.14); }
+  .sidebar-item.active,
+  [data-theme="dark"] .sidebar-item.active {
+    background: #fff; color: #0b1f19; border: 0;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+  .sidebar-item.active .sidebar-item-icon { color: #0b1f19; }
+  .sidebar-item-icon { margin: 0; }
+
+  .sidebar-footer { margin-top: auto; padding: 0; border: 0; display: grid; place-items: center; }
+  .sidebar-logout {
+    display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
+    border: 1px solid var(--glass-line); background: rgba(255, 255, 255, 0.05);
+    color: #8aa39b; cursor: pointer;
+  }
+  .sidebar-logout:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+
+  .main-wrapper,
+  .main-wrapper.sidebar-collapsed { margin-left: calc(76px + var(--gap) * 2); }
+
+  /* ── Top bar ───────────────────────────────────────────── */
+  .navbar,
+  .navbar.sidebar-collapsed,
+  [data-theme="dark"] .navbar {
+    left: 0; right: 0; top: 0;
+    height: var(--navbar-height);
+    border-radius: 0;
+    border: 0;
+    border-bottom: 1px solid var(--glass-line);
+    box-shadow: none;
+    gap: 24px;
+  }
+  .navbar-left > :not(.navbar-brand) { display: none !important; }
+  .navbar-brand { display: flex; align-items: center; gap: 10px; }
+  .navbar-brand img { width: 34px; height: 34px; object-fit: contain; }
+  .navbar-brand span { font-weight: 600; font-size: 15px; color: var(--text-primary); white-space: nowrap; }
+  .navbar-left { min-width: 160px; }
+
+  .navbar-right { flex: 1; min-width: 0; gap: 12px; }
+  .navbar-right > .navbar-search-pill {
+    flex: 1; max-width: 520px; margin-right: auto; height: 42px;
+    border-radius: 999px; padding: 0 18px;
+  }
+  .navbar-right > .navbar-sep { display: none; }
+  .navbar-hi { display: inline; font-weight: 500; font-size: 15px; color: var(--text-primary); white-space: nowrap; }
+
+  .main-content { margin-top: calc(var(--navbar-height) + var(--gap)); padding: 8px var(--gap) 24px 0; }
+}
+
+/* mobile drawer: keep logout out of the way */
+@media (max-width: 768px) {
+  .sidebar-logout { display: none; }
+}
+
+/* ── Top bar background image ──────────────────────────────────
+   To use your own picture, replace the two files in src/assets
+   (navbar-bg-light.svg / navbar-bg-dark.svg) or point these URLs
+   at a .jpg/.png (e.g. ../assets/my-banner.jpg). */
+.navbar,
+.navbar.sidebar-collapsed {
+  background-color: var(--bg-card, #fff);
+  /* styles available: aurora (violet/pink), ocean (blue/teal), or the original green (navbar-bg-light/dark) */
+  background-image: url('../assets/navbar-bg-aurora-light.svg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-theme="dark"] .navbar,
+[data-theme="dark"] .navbar.sidebar-collapsed {
+  background-image: url('../assets/navbar-bg-aurora-dark.svg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}

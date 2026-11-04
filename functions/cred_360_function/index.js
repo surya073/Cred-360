@@ -14,6 +14,50 @@ app.use(express.json());
 app.use(fileUpload({ useTempFiles: true, tempFileDir: '/tmp/', createParentPath: true }));
 
 const { APP_URL, PROFILE_FOLDER_ID, FROM_EMAIL, ROLE_MAP, ROLE_ID_MAP, INVITE_ROLE_ID_MAP } = require('shared-utils/constants');
+const emailTpl = require('shared-utils/emailTemplates');
+const { sendTemplated } = emailTpl;
+
+// Share tokens are always 64 hex chars (crypto.randomBytes(32)). Reject anything else
+// before it reaches a ZCQL string.
+const TOKEN_RE = /^[a-f0-9]{64}$/;
+
+// Constant-time string compare (passphrases).
+const safeEqual = (a, b) => {
+  const x = Buffer.from(String(a ?? '')), y = Buffer.from(String(b ?? ''));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+// Tell a password's owner (when someone else acted) and every team it is shared with.
+const notifyPasswordStakeholders = async (catalystApp, actor, pwRow, event_type, title, details) => {
+  try {
+    const actorName = `${actor.first_name || ''} ${actor.last_name || ''}`.trim() || actor.email_id;
+    const base = { event_type, ref_id: pwRow.ROWID, ref_name: pwRow.name, actor_id: actor.user_id, actor_name: actorName, title, details };
+    if (pwRow.owner_id && String(pwRow.owner_id) !== String(actor.user_id)) {
+      pushNotification(catalystApp, { ...base, recipient_type: 'user', recipient_id: pwRow.owner_id }).catch(() => {});
+    }
+    const teamShares = await catalystApp.zcql().executeZCQLQuery(
+      `SELECT shared_with FROM PasswordShares WHERE password_id = '${pwRow.ROWID}' AND share_type = 'team'`
+    ).catch(() => []);
+    [...new Set(teamShares.map(r => String((r.PasswordShares || r).shared_with)))].forEach(teamId =>
+      pushNotification(catalystApp, { ...base, recipient_type: 'team', recipient_id: teamId }).catch(() => {}));
+  } catch (e) { console.log('notifyPasswordStakeholders:', e.message); }
+};
+
+// getAllUsers() is a full directory fetch — memoise it per request so loops don't repeat it.
+const makeUserLookup = (catalystApp) => {
+  let p;
+  return () => (p = p || catalystApp.userManagement().getAllUsers().catch(() => []));
+};
+
+// Tell the person who created an external share what happened to it (fire-and-forget).
+const notifyShareOwner = (catalystApp, share, event_type, title, details, refName = '') => {
+  if (!share || !share.created_by) return;
+  pushNotification(catalystApp, {
+    event_type, recipient_type: 'user', recipient_id: share.created_by,
+    ref_id: share.ROWID, ref_name: refName || share.description || '',
+    actor_name: share.shared_with || 'External user', title, details,
+  }).catch(() => {});
+};
 const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain, upsertExternalUser, isExternalUserBlocked, pushNotification } = require('shared-utils/helpers');
 const { permList, shareIsActive, getUserTeamIds, getDescendantFolderIds, userCanOnPassword, userCanOnFolder, validateExternalShare, checkRateLimit, recordFailedAttempt, clearAttempts } = require('shared-utils/permissions');
 
@@ -538,6 +582,7 @@ app.put('/api/passwords/:id', async (req, res) => {
       action: 'Password updated', user_id: user.user_id, user_email: user.email_id,
       password_id: req.params.id, details: `Updated password: ${req.body.name}`,
     });
+    notifyPasswordStakeholders(catalystApp, user, pwRow, 'password_updated', 'Password updated', `"${req.body.name}" was updated`);
 
     res.json({ success: true, data: row });
   } catch(e) {
@@ -561,6 +606,7 @@ app.delete('/api/passwords/:id', async (req, res) => {
       return res.status(403).json({ success: false, error: 'You do not have delete access to this password' });
     }
 
+    await notifyPasswordStakeholders(catalystApp, user, pwRow, 'password_deleted', 'Password deleted', `"${pwRow.name}" was deleted`);
     await catalystApp.datastore().table('Passwords').deleteRow(req.params.id);
 
     logActivity(catalystApp, {
@@ -725,11 +771,12 @@ app.put('/api/folders/:id', async (req, res) => {
       ).catch(() => []);
       const activeShares = shareRows.map(r => r.PasswordShares || r).filter(s => shareIsActive(s));
 
+      const getUsers = makeUserLookup(catalystApp);
       for (const s of activeShares) {
         const looksLikeTeamId = !String(s.shared_with).includes('@');
         let recipientId = s.shared_with;
         if (!looksLikeTeamId) {
-          const allUsers = await catalystApp.userManagement().getAllUsers().catch(() => []);
+          const allUsers = await getUsers();
           const match = allUsers.find(u => u.email_id === s.shared_with);
           recipientId = match ? match.user_id : s.shared_with;
         }
@@ -789,11 +836,12 @@ app.delete('/api/folders/:id', async (req, res) => {
       `SELECT * FROM PasswordShares WHERE share_type = 'folder' AND password_id = '${req.params.id}'`
     ).catch(() => []);
     const activeShares = shareRows.map(r => r.PasswordShares || r).filter(s => shareIsActive(s));
+    const getUsers = makeUserLookup(catalystApp);
     for (const s of activeShares) {
       const looksLikeTeamId = !String(s.shared_with).includes('@');
       let recipientId = s.shared_with;
       if (!looksLikeTeamId) {
-        const allUsers = await catalystApp.userManagement().getAllUsers().catch(() => []);
+        const allUsers = await getUsers();
         const match = allUsers.find(u => u.email_id === s.shared_with);
         recipientId = match ? match.user_id : s.shared_with;
       }
@@ -1263,27 +1311,13 @@ app.post('/api/shares/external', async (req, res) => {
 
     const [pwRows] = await Promise.all([
       zcql.executeZCQLQuery(`SELECT name FROM Passwords WHERE ROWID = ${req.body.password_id}`).catch(() => []),
-      catalystApp.email().sendMail({
-        from_email: FROM_EMAIL, to_email: req.body.client_email,
-        subject: 'CRED-360 — Secure Password Shared With You', html_mode: true,
-        content: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-          <div style="background:#7c3aed;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-            <h1 style="color:#fff;margin:0;font-size:22px;letter-spacing:2px;">CRED-360</h1>
-            <p style="color:#ddd6fe;margin:6px 0 0;font-size:13px;">Secure Password Management</p></div>
-          <div style="background:#ffffff;padding:32px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
-            <h2 style="color:#111827;margin:0 0 12px;">A password has been shared with you</h2>
-            <p style="color:#6b7280;margin:0 0 16px;"><strong style="color:#111827;">${user.first_name || user.email_id}</strong> has securely shared a password with you via CRED-360.</p>
-            ${req.body.description ? `<p style="color:#6b7280;margin:0 0 16px;"><strong style="color:#111827;">Description:</strong> ${req.body.description}</p>` : ''}
-            <div style="background:#f5f3ff;border:2px solid #7c3aed;border-radius:8px;padding:20px;margin:20px 0;text-align:center;">
-              <p style="color:#6b7280;margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Your Access Passphrase</p>
-              <div style="font-size:24px;font-weight:700;color:#7c3aed;letter-spacing:3px;font-family:monospace;">${autoPassphrase}</div>
-              <p style="color:#9ca3af;margin:8px 0 0;font-size:12px;">You will need this passphrase to view the shared password</p></div>
-            <div style="text-align:center;margin:28px 0;">
-              <a href="${shareLink}" style="background:#7c3aed;color:#ffffff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;display:inline-block;">View Shared Password</a></div>
-            <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:14px;margin:16px 0;">
-              <p style="color:#92400e;margin:0;font-size:13px;"><strong>Security Notice:</strong> This link expires on
-                <strong>${new Date(req.body.expiry.replace(' ', 'T') + 'Z').toLocaleString()}</strong>. Do not forward this email.</p></div></div></div>`,
-      }).catch(e => {
+      sendTemplated(catalystApp, req.body.client_email, emailTpl.externalPasswordShare({
+        sharedBy: user.first_name || user.email_id,
+        description: req.body.description,
+        passphrase: autoPassphrase,
+        link: shareLink,
+        expiry: req.body.expiry,
+      })).catch(e => {
         console.log('Email send error:', e.message);
         emailError = e.message;
       }),
@@ -1331,32 +1365,16 @@ app.post('/api/shares/external/folder', async (req, res) => {
       is_viewed: false, created_by: user.user_id, created_time: now(),
       permissions: Array.isArray(req.body.permissions) ? req.body.permissions.join(',') : (req.body.permissions || ''),
     });
-    const expiryStr = req.body.expiry
-      ? new Date(req.body.expiry.replace(' ', 'T') + 'Z').toLocaleString()
-      : 'Never';
-
     let emailError = null;
-    await catalystApp.email().sendMail({
-      from_email: FROM_EMAIL, to_email: req.body.client_email,
-      subject: `CRED-360 — Folder "${req.body.folder_name}" Shared With You`, html_mode: true,
-      content: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-        <div style="background:#7c3aed;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-          <h1 style="color:#fff;margin:0;font-size:22px;letter-spacing:2px;">CRED-360</h1>
-          <p style="color:#ddd6fe;margin:6px 0 0;font-size:13px;">Secure Password Management</p></div>
-        <div style="background:#ffffff;padding:32px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
-          <h2 style="color:#111827;margin:0 0 12px;">A folder has been shared with you</h2>
-          <p style="color:#6b7280;margin:0 0 16px;"><strong style="color:#111827;">${user.first_name || user.email_id}</strong>
-            has securely shared the folder <strong style="color:#7c3aed;">"${req.body.folder_name}"</strong> with you via CRED-360.</p>
-          ${req.body.description ? `<p style="color:#6b7280;margin:0 0 16px;"><strong style="color:#111827;">Description:</strong> ${req.body.description}</p>` : ''}
-          <p style="color:#6b7280;margin:0 0 20px;">This folder contains <strong style="color:#111827;">${req.body.password_count} password${req.body.password_count > 1 ? 's' : ''}</strong>.</p>
-          <div style="background:#f5f3ff;border:2px solid #7c3aed;border-radius:8px;padding:20px;margin:20px 0;text-align:center;">
-            <p style="color:#6b7280;margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Your Access Passphrase</p>
-            <div style="font-size:24px;font-weight:700;color:#7c3aed;letter-spacing:3px;font-family:monospace;">${autoPassphrase}</div></div>
-          <div style="text-align:center;margin:28px 0;">
-            <a href="${shareLink}" style="background:#7c3aed;color:#ffffff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;display:inline-block;">View Shared Folder</a></div>
-          <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:14px;margin:16px 0;">
-            <p style="color:#92400e;margin:0;font-size:13px;"><strong>Security Notice:</strong> This link expires on <strong>${expiryStr}</strong>. Do not forward this email.</p></div></div></div>`,
-    }).catch(e => {
+    await sendTemplated(catalystApp, req.body.client_email, emailTpl.externalFolderShare({
+      sharedBy: user.first_name || user.email_id,
+      folderName: req.body.folder_name,
+      count: req.body.password_count,
+      description: req.body.description,
+      passphrase: autoPassphrase,
+      link: shareLink,
+      expiry: req.body.expiry,
+    })).catch(e => {
       console.log('Email send error:', e.message);
       emailError = e.message;
     });
@@ -1540,6 +1558,7 @@ app.get('/api/shares/received', async (req, res) => {
 
 app.get('/api/shares/validate/:token', async (req, res) => {
   try {
+    if (!TOKEN_RE.test(req.params.token || '')) return res.status(404).json({ success: false, error: 'Invalid or expired link' });
     const catalystApp = catalyst.initialize(req);
     const rows = await catalystApp.zcql().executeZCQLQuery(
       `SELECT * FROM PasswordShares WHERE token = '${req.params.token}'`
@@ -1568,6 +1587,7 @@ app.post('/api/shares/verify-passphrase', async (req, res) => {
     if (!token || !passphrase) {
       return res.status(400).json({ success: false, error: 'Token and passphrase are required' });
     }
+    if (!TOKEN_RE.test(String(token))) return res.status(404).json({ success: false, error: 'Invalid link' });
 
     const limit = checkRateLimit(token);
     if (!limit.allowed) {
@@ -1586,8 +1606,9 @@ app.post('/api/shares/verify-passphrase', async (req, res) => {
     const expiryDate = new Date(share.expiry.replace(' ', 'T') + 'Z');
     if (expiryDate < new Date()) return res.status(410).json({ success: false, error: 'This link has expired' });
 
-    if (share.passphrase !== passphrase) {
+    if (!safeEqual(share.passphrase, passphrase)) {
           const attemptsLeft = recordFailedAttempt(token);
+          if (attemptsLeft === 0) notifyShareOwner(catalystApp, share, 'external_share_locked', 'External link locked', 'Too many wrong passphrase attempts — the link is temporarily locked.');
           return res.status(401).json({
             success: false,
             error: `Incorrect passphrase. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`,
@@ -1619,6 +1640,8 @@ app.post('/api/shares/verify-passphrase', async (req, res) => {
       password_id: String(share.password_id),
       details: itemName ? `"${itemName}" viewed by external user` : 'Viewed by external user',
     });
+    notifyShareOwner(catalystApp, share, 'external_share_viewed', isFolderShare ? 'External folder opened' : 'External share opened',
+      `${share.shared_with || 'An external user'} opened ${itemName ? `"${itemName}"` : 'your shared link'}`, itemName);
 
     if (isFolderShare) {
       return res.json({
@@ -1716,5 +1739,8 @@ app.post('/api/shares/verify-passphrase', async (req, res) => {
 //     res.status(500).json({ success: false, error: e.message });
 //   }
 // });
+
+// ── TEAM CHAT ─────────────────────────────────────────────────────────────────
+require('./chat')(app);
 
 module.exports = app;

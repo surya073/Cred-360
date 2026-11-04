@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import Toast, { useToast } from '../components/Toast';
+import DataTable from '../components/DataTable';
+import { formatDate } from '../utils/dateHelper';
 import {
   RiUserLine, RiAddLine, RiRefreshLine,
-  RiSearchLine, RiShieldUserLine, RiMailLine,
+  RiShieldUserLine, RiMailLine,
   RiUserStarLine, RiDeleteBinLine,
-  RiArrowLeftLine, RiArrowRightLine,
   RiKeyLine, RiFolderLine, RiTeamLine, RiGlobalLine,
   RiShareLine, RiTimeLine, RiBarChartBoxLine,
 } from 'react-icons/ri';
@@ -17,7 +18,6 @@ const API_EXTRAS = '/server/cred_360_extras_function';
 
 
 const ROLES    = ['Admin', 'Team Lead', 'Employee', 'Intern'];
-const PER_PAGE = 10;
 
 const ROLE_COLORS = {
   admin:       { bg: '#eff6ff', color: '#1d4ed8' },
@@ -44,8 +44,6 @@ const Users = () => {
 
   const [users, setUsers]                 = useState([]);
   const [loading, setLoading]             = useState(true);
-  const [search, setSearch]               = useState('');
-  const [page, setPage]                   = useState(1);
   const [showInvite, setShowInvite]       = useState(false);
   const [inviteEmail, setInviteEmail]     = useState('');
   const [inviteRole, setInviteRole]       = useState('Employee');
@@ -85,26 +83,85 @@ const Users = () => {
     return () => { document.body.style.overflow = ''; };
   }, [showInvite, showRoleModal, deleteTarget, analyticsUser]);
 
-  // reset page on search
-  useEffect(() => { setPage(1); }, [search]);
 
-  const filtered = users.filter(u =>
-    (u.name  || '').toLowerCase().includes(search.toLowerCase()) ||
-    (u.email || '').toLowerCase().includes(search.toLowerCase()) ||
-    (u.role  || '').toLowerCase().includes(search.toLowerCase())
-  );
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  const paginated  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-
-  function getPageNums() {
-    const nums = [];
-    let start = Math.max(1, page - 2);
-    let end   = Math.min(totalPages, start + 4);
-    if (end - start < 4) start = Math.max(1, end - 4);
-    for (let i = start; i <= end; i++) nums.push(i);
-    return nums;
-  }
+  const columns = [
+    {
+      key: 'name', label: 'User', sortable: true,
+      render: (u) => {
+        const style = getRoleStyle(u.role);
+        const isSelf = u.email === currentUser?.email_id;
+        return (
+          <div className="user-cell">
+            {u.profile_image ? (
+              <img
+                src={`${API_CORE}/api/profile/image/${u.profile_image}`}
+                alt={u.name}
+                style={{ width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid var(--border-color)' }}
+                onError={e => { e.target.style.display = 'none'; }}
+              />
+            ) : (
+              <div className="user-avatar-sm" style={{ background: style.bg, color: style.color }}>
+                {getInitials(u.name, u.email)}
+              </div>
+            )}
+            <div className="td-bold">
+              {u.name || 'Unknown'}
+              {isSelf && <span className="self-badge">You</span>}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'email', label: 'Email', sortable: true,
+      render: (u) => (
+        <div className="flex gap-8" style={{ alignItems: 'center' }}>
+          <RiMailLine size={14} style={{ color: 'var(--text-muted)' }} />
+          <span className="td-muted">{u.email}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'role', label: 'Role', sortable: true,
+      render: (u) => {
+        const style = getRoleStyle(u.role);
+        return <span className="badge" style={{ background: style.bg, color: style.color }}>{u.role || 'User'}</span>;
+      },
+    },
+    {
+      key: 'status', label: 'Status',
+      render: (u) => (u.status && u.status !== 'ACTIVE'
+        ? <span className="badge badge-warning">{u.status.charAt(0) + u.status.slice(1).toLowerCase()}</span>
+        : <span className="badge badge-success">Active</span>),
+    },
+    {
+      key: 'joined', label: 'Joined', sortable: true,
+      render: (u) => <span className="td-muted" style={{ fontSize: 12.5 }}>{formatDate(u.joined)}</span>,
+    },
+    ...(isAdmin ? [{
+      key: 'actions', label: 'Actions',
+      render: (u) => {
+        const isSelf = u.email === currentUser?.email_id;
+        return (
+          <div className="flex gap-8" onClick={e => e.stopPropagation()}>
+            <button className="icon-btn" onClick={() => openAnalytics(u)} title="View analytics">
+              <RiBarChartBoxLine size={15} />
+            </button>
+            {!isSelf && (
+              <>
+                <button className="icon-btn" onClick={() => openRoleChange(u)} title="Change role">
+                  <RiShieldUserLine size={15} />
+                </button>
+                <button className="icon-btn danger" onClick={() => setDeleteTarget(u)} title="Delete user">
+                  <RiDeleteBinLine size={15} />
+                </button>
+              </>
+            )}
+          </div>
+        );
+      },
+    }] : []),
+  ];
 
   const handleInvite = async () => {
     if (!inviteEmail) return toast.error('Please enter an email address.');
@@ -135,8 +192,8 @@ const Users = () => {
       setShowRoleModal(false);
       toast.success('Role updated successfully!');
       fetchUsers();
-    } catch {
-      toast.error('Role update failed. Try again.');
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Role update failed. Try again.');
     } finally {
       setSavingRole(false);
     }
@@ -213,145 +270,21 @@ const Users = () => {
         })}
       </div>
 
-      {/* ── Table card ── */}
-      <div className="card">
-        <div className="table-toolbar">
-          <div className="search-box">
-            <RiSearchLine size={16} className="search-icon" />
-            <input
-              type="text"
-              placeholder="Search users..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="search-input"
-            />
-          </div>
-          <span className="result-count">{filtered.length} users</span>
-        </div>
-
-        {loading ? (
-          <div className="table-loading">
-            {[...Array(5)].map((_, i) => <div key={i} className="skeleton-row" />)}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="empty-state">
-            <RiUserLine size={40} />
-            <p>{search ? 'No users match your search' : 'No users found'}</p>
-          </div>
-        ) : (
-          <>
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    {isAdmin && <th>Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated.map((u, i) => {
-                    const style = getRoleStyle(u.role);
-                    const isSelf = u.email === currentUser?.email_id;
-                    return (
-                      <tr key={u.ROWID || i}
-                        className={isAdmin ? 'user-row-clickable' : ''}
-                        onClick={() => isAdmin && openAnalytics(u)}
-                        style={isAdmin ? { cursor: 'pointer' } : {}}>
-                        <td>
-                          <div className="user-cell">
-                            {/* Profile image or initials avatar */}
-                            {u.profile_image ? (
-                              <img
-                                src={`${API_CORE}/api/profile/image/${u.profile_image}`}
-                                alt={u.name}
-                                style={{
-                                  width: 34, height: 34, borderRadius: '50%',
-                                  objectFit: 'cover', flexShrink: 0,
-                                  border: '2px solid var(--border-color)',
-                                }}
-                                onError={e => { e.target.style.display = 'none'; }}
-                              />
-                            ) : (
-                              <div className="user-avatar-sm"
-                                style={{ background: style.bg, color: style.color }}>
-                                {getInitials(u.name, u.email)}
-                              </div>
-                            )}
-                            <div>
-                              <div className="td-bold">
-                                {u.name || 'Unknown'}
-                                {isSelf && <span className="self-badge">You</span>}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="flex gap-8" style={{ alignItems: 'center' }}>
-                            <RiMailLine size={14} style={{ color: 'var(--text-muted)' }} />
-                            <span className="td-muted">{u.email}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <span className="badge" style={{ background: style.bg, color: style.color }}>
-                            {u.role || 'User'}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="badge badge-success">Active</span>
-                        </td>
-                        {isAdmin && (
-                          <td onClick={e => e.stopPropagation()}>
-                            <div className="flex gap-8">
-                              <button className="icon-btn" onClick={() => openAnalytics(u)} title="View analytics">
-                                <RiBarChartBoxLine size={15} />
-                              </button>
-                              {!isSelf && (
-                                <>
-                                  <button className="icon-btn" onClick={() => openRoleChange(u)} title="Change role">
-                                    <RiShieldUserLine size={15} />
-                                  </button>
-                                  <button className="icon-btn danger" onClick={() => setDeleteTarget(u)} title="Delete user">
-                                    <RiDeleteBinLine size={15} />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* ── Pagination ── */}
-            {totalPages > 1 && (
-              <div className="pagination">
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, filtered.length)} of {filtered.length}
-                </span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button className="page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-                    <RiArrowLeftLine size={14} />
-                  </button>
-                  {getPageNums().map(n => (
-                    <button key={n} className={`page-btn ${page === n ? 'active' : ''}`} onClick={() => setPage(n)}>
-                      {n}
-                    </button>
-                  ))}
-                  <button className="page-btn" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
-                    <RiArrowRightLine size={14} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {/* ── Table ── */}
+      <DataTable
+        columns={columns}
+        rows={users}
+        rowKey="ROWID"
+        loading={loading}
+        dateField="joined"
+        searchKeys={['name', 'email', 'role']}
+        searchPlaceholder="Search name, email or role…"
+        filters={[{ key: 'role', label: 'All roles', options: ROLES.map(r => ({ value: r, label: r })) }]}
+        onRowClick={isAdmin ? openAnalytics : undefined}
+        onRefresh={fetchUsers}
+        emptyIcon={<RiUserLine size={34} />}
+        emptyText="No users found"
+      />
 
       {/* ── Invite Modal ── */}
       {showInvite && (

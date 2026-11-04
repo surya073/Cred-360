@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 
 const { ROLE_MAP, ROLE_ID_MAP, INVITE_ROLE_ID_MAP, APP_URL } = require('shared-utils/constants');
-const { getCurrentUser, now, logActivity, mapBy, pushNotification } = require('shared-utils/helpers');
+const { getCurrentUser, now, logActivity, mapBy, pushNotification, escapeLike, appRole, isAdmin: isAdminUser } = require('shared-utils/helpers');
 const { permList, shareIsActive } = require('shared-utils/permissions');
 
 async function getMemberPermissions(catalystApp, teamId, userId) {
@@ -45,6 +45,8 @@ app.get('/api/users', async (req, res) => {
       email:         u.email_id,
       role:          ROLE_MAP[u.role_details?.role_name] || 'Employee',
       profile_image: profileImages[u.user_id] || null,
+      joined:        u.created_time || '',
+      status:        String(u.status || 'ACTIVE').toUpperCase(),
     }));
 
     res.json({ success: true, data: formatted });
@@ -58,6 +60,12 @@ app.put('/api/users/:id/role', async (req, res) => {
     const catalystApp = catalyst.initialize(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+    // Only admins may change roles — otherwise anyone could promote themselves.
+    if (!isAdminUser(user)) return res.status(403).json({ success: false, error: 'Admin access required' });
+    if (String(req.params.id) === String(user.user_id)) {
+      return res.status(400).json({ success: false, error: 'You cannot change your own role' });
+    }
 
     const roleId = ROLE_ID_MAP[req.body.role];
     if (!roleId) return res.status(400).json({ success: false, error: 'Invalid role' });
@@ -100,16 +108,31 @@ app.post('/api/users/invite', async (req, res) => {
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-    const roleId = INVITE_ROLE_ID_MAP[req.body.role] || '46135000000013078';
+    // Admins can invite anyone; Team Leads may only invite Employees/Interns; everyone else cannot invite.
+    const inviterRole = appRole(user);
+    const wantedRole  = INVITE_ROLE_ID_MAP[req.body.role] ? req.body.role : 'Employee';
+    if (inviterRole !== 'Admin') {
+      if (inviterRole !== 'Team Lead') return res.status(403).json({ success: false, error: 'You do not have permission to invite users' });
+      if (wantedRole === 'Admin' || wantedRole === 'Team Lead') {
+        return res.status(403).json({ success: false, error: 'Team Leads can only invite Employees or Interns' });
+      }
+    }
+
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      return res.status(400).json({ success: false, error: 'Enter a valid email address' });
+    }
+
+    const roleId = INVITE_ROLE_ID_MAP[wantedRole] || '46135000000013078';
 
     await catalystApp.userManagement().registerUser(
       { platform_type: 'web', redirect_url: APP_URL },
-      { first_name: req.body.email.split('@')[0], last_name: '', email_id: req.body.email, role_id: roleId }
+      { first_name: email.split('@')[0], last_name: '', email_id: email, role_id: roleId }
     );
 
     logActivity(catalystApp, {
       action: 'User invited', user_id: user.user_id, user_email: user.email_id,
-      password_id: '', details: `Invited ${req.body.email} as ${req.body.role || 'Employee'}`,
+      password_id: '', details: `Invited ${email} as ${wantedRole}`,
     });
 
     res.json({ success: true, message: 'Invitation sent successfully' });
@@ -245,6 +268,12 @@ app.put('/api/teams/:id', async (req, res) => {
       action: 'Team updated', user_id: user.user_id, user_email: user.email_id,
       password_id: '', details: `Updated team: ${req.body.name}`,
     });
+    pushNotification(catalystApp, {
+      event_type: 'team_updated', recipient_type: 'team', recipient_id: req.params.id,
+      ref_id: req.params.id, ref_name: req.body.name, actor_id: user.user_id,
+      actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
+      title: 'Team updated', details: `Team details for "${req.body.name}" were updated`,
+    }).catch(() => {});
     res.json({ success: true, data: row });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -262,7 +291,20 @@ app.delete('/api/teams/:id', async (req, res) => {
     ).catch(() => []);
     const name = rows[0] ? (rows[0].Teams || rows[0]).name : req.params.id;
 
+    const memberRows = await catalystApp.zcql().executeZCQLQuery(
+      `SELECT user_id FROM TeamMembers WHERE team_id = '${req.params.id}'`
+    ).catch(() => []);
+
     await catalystApp.datastore().table('Teams').deleteRow(req.params.id);
+
+    memberRows.map(r => String((r.TeamMembers || r).user_id))
+      .filter(id => id && id !== String(user.user_id))
+      .forEach(uid => pushNotification(catalystApp, {
+        event_type: 'team_deleted', recipient_type: 'user', recipient_id: uid,
+        ref_id: req.params.id, ref_name: name, actor_id: user.user_id,
+        actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
+        title: 'Team deleted', details: `The team "${name}" was deleted`,
+      }).catch(() => {}));
 
     logActivity(catalystApp, {
       action: 'Team deleted', user_id: user.user_id, user_email: user.email_id,
@@ -496,6 +538,13 @@ app.put('/api/teams/:id/toggle-active', async (req, res) => {
       ROWID: req.params.id, is_active: newActive,
     });
 
+    pushNotification(catalystApp, {
+      event_type: 'team_status_changed', recipient_type: 'team', recipient_id: req.params.id,
+      ref_id: req.params.id, actor_id: user.user_id,
+      actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
+      title: newActive ? 'Team activated' : 'Team deactivated',
+      details: newActive ? 'This team is active again — shared items are accessible' : 'This team was deactivated — shared items are paused',
+    }).catch(() => {});
     res.json({ success: true, data: { is_active: newActive } });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -807,26 +856,65 @@ app.post('/api/notifications/mark-read', async (req, res) => {
 });
 
 // GET /api/activity-logs?scope=mine|org
+//   Optional server-side paging/filtering (used by the table):
+//   &page=1&limit=15&search=text&action=created&from=YYYY-MM-DD HH:mm:ss&to=YYYY-MM-DD HH:mm:ss
+//   from/to are UTC bounds (the client converts the user's local day range).
+//   Without `page` the old behaviour is kept (latest 200 rows).
+const UTC_DT = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 app.get('/api/activity-logs', async (req, res) => {
   try {
     const catalystApp = catalyst.initialize(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-    const isAdmin = user.role_details?.role_name === 'Admin'; // ← adjust if your admin role string differs
+    const isAdmin = isAdminUser(user);
     const scope = req.query.scope === 'org' ? 'org' : 'mine';
+    const zcql  = catalystApp.zcql();
 
-    let query = `SELECT * FROM ActivityLogs`;
+    const where = [];
     // Non-admins are always locked to their own logs, regardless of what scope is requested
-    if (scope === 'mine' || !isAdmin) {
-      query += ` WHERE user_email = '${user.email_id}'`;
-    }
-    query += ` ORDER BY ROWID DESC LIMIT 200`;
+    if (scope === 'mine' || !isAdmin) where.push(`user_email = '${escapeLike(user.email_id)}'`);
 
-    const rows = await catalystApp.zcql().executeZCQLQuery(query);
+    const paged = req.query.page !== undefined;
+    if (paged) {
+      const q = escapeLike(String(req.query.search || '').trim()).replace(/[\\%_]/g, '').slice(0, 80);
+      if (q) where.push(`(action LIKE '%${q}%' OR user_email LIKE '%${q}%' OR details LIKE '%${q}%')`);
+
+      const action = String(req.query.action || '').trim().toLowerCase();
+      if (action && action !== 'all' && /^[a-z ]{1,20}$/.test(action)) where.push(`action LIKE '%${action}%'`);
+
+      const from = String(req.query.from || '');
+      const to   = String(req.query.to || '');
+      if (UTC_DT.test(from)) where.push(`created_time >= '${from}'`);
+      if (UTC_DT.test(to))   where.push(`created_time <= '${to}'`);
+    }
+    const whereSql = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+
+    if (!paged) {
+      const rows = await zcql.executeZCQLQuery(`SELECT * FROM ActivityLogs${whereSql} ORDER BY ROWID DESC LIMIT 200`);
+      return res.json({
+        success: true,
+        data: rows.map(r => r.ActivityLogs || r),
+        currentUserEmail: user.email_id,
+        isAdmin,
+      });
+    }
+
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 15));
+    const page     = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const offset   = (page - 1) * pageSize;
+
+    const [rows, countRows] = await Promise.all([
+      zcql.executeZCQLQuery(`SELECT * FROM ActivityLogs${whereSql} ORDER BY ROWID DESC LIMIT ${offset}, ${pageSize}`),
+      zcql.executeZCQLQuery(`SELECT COUNT(ROWID) FROM ActivityLogs${whereSql}`).catch(() => []),
+    ]);
+    const countRow = countRows[0] ? (countRows[0].ActivityLogs || countRows[0]) : null;
+    const total = countRow ? Number(Object.values(countRow)[0]) || 0 : rows.length;
+
     res.json({
       success: true,
       data: rows.map(r => r.ActivityLogs || r),
+      total, page, pageSize,
       currentUserEmail: user.email_id,
       isAdmin,
     });
@@ -847,7 +935,7 @@ app.post('/api/activity-logs/bulk-delete', async (req, res) => {
       return res.status(400).json({ success: false, error: 'No ids provided' });
     }
 
-    const isAdmin = user.role_details?.role_name === 'Admin'; // ← same string as above
+    const isAdmin = isAdminUser(user);
     const table = catalystApp.datastore().table('ActivityLogs');
 
     if (!isAdmin) {
@@ -873,7 +961,7 @@ app.get('/api/activity-logs/analytics', async (req, res) => {
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-    const isAdmin = user.role_details?.role_name === 'Admin'; // ← adjust if your admin role string differs
+    const isAdmin = isAdminUser(user);
 
     let query = `SELECT * FROM ActivityLogs`;
     if (!isAdmin) {

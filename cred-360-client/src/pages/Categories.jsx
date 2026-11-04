@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import axios from 'axios';
+import axios from '../services/api';
 import {
   RiPriceTag3Line, RiAddLine, RiEditLine, RiDeleteBinLine,
   RiRefreshLine, RiCloseLine, RiCheckLine, RiSearchLine,
@@ -66,10 +66,10 @@ const Categories = () => {
   const [seeding, setSeeding]             = useState(false);
   const searchTimer                       = useRef(null);
 
-  const fetchCategories = useCallback(async () => {
+  const fetchCategories = useCallback(async (fresh) => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/api/categories`);
+      const res = await axios.get(`${API}/api/categories`, { fresh: fresh === true });
       if (res.data.success) setAllCategories(res.data.data || []);
     } catch {
       toast.error('Failed to load categories');
@@ -197,7 +197,7 @@ const Categories = () => {
           </p>
         </div>
         <div className="flex gap-8">
-          <button className="btn btn-secondary" onClick={fetchCategories} title="Refresh">
+          <button className="btn btn-secondary" onClick={() => fetchCategories(true)} title="Refresh">
             <RiRefreshLine size={16} />
           </button>
           <button className="btn btn-secondary" onClick={handleSeedDefaults} disabled={seeding}>

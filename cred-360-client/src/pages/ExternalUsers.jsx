@@ -5,6 +5,7 @@ import { RiGlobalLine, RiEditLine, RiDeleteBinLine, RiShieldLine,
          RiArrowLeftLine, RiArrowRightLine,
          RiStarFill, RiStarLine } from 'react-icons/ri';
 import { useNavbar } from '../context/NavbarContext';
+import Toast, { useToast } from '../components/Toast';
 import '../styles/external-users.css';
 
 const API = '/server/cred_360_extras_function/api';
@@ -35,7 +36,7 @@ export default function ExternalUsers() {
   const [editTarget, setEdit]     = useState(null);
   const [deleteTarget, setDelete] = useState(null);
   const [saving, setSaving]       = useState(false);
-  const [toast, setToast]         = useState(null);
+  const { toasts, removeToast, toast } = useToast();
   const [addOpen, setAddOpen]     = useState(false);
   const [addForm, setAddForm]     = useState({ name: '', email: '', company: '', notes: '' });
   const [isAdmin, setIsAdmin]           = useState(false);
@@ -44,10 +45,7 @@ export default function ExternalUsers() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [orgView, setOrgView] = useState(false); // false = my users, true = org view
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+  const showToast = (msg, type = 'success') => (toast[type] || toast.info)(msg);
 
 const fetchUsers = useCallback(async () => {
   setLoading(true);
@@ -577,12 +575,7 @@ async function openDetail(u) {
 
 
       {/* ── Toast ── */}
-      {toast && (
-        <div className={`eu-toast eu-toast-${toast.type}`}>
-          {toast.type === 'success' ? <RiCheckLine size={15} /> : <RiShieldLine size={15} />}
-          {toast.msg}
-        </div>
-      )}
+      <Toast toasts={toasts} removeToast={removeToast} />
 
       {/* ── Detail Offcanvas ── */}
       {detailUser && (

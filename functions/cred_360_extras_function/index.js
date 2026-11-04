@@ -7,7 +7,9 @@ app.use(express.json());
 
 const { encrypt, decrypt } = require('shared-utils/encryption');
 
-const { ROLE_MAP, FROM_EMAIL } = require('shared-utils/constants');
+const { ROLE_MAP, FROM_EMAIL, APP_URL } = require('shared-utils/constants');
+const emailTpl = require('shared-utils/emailTemplates');
+const { sendTemplated } = emailTpl;
 const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain } = require('shared-utils/helpers');
 const { permList } = require('shared-utils/permissions');
 
@@ -507,47 +509,17 @@ app.post('/api/cron/check-expiry', async (req, res) => {
         try {
           await pwTable.updateRow({ ROWID: pw.ROWID, is_expired: true });
           expired++;
-          await mail.sendMail({
-            from_email: FROM_EMAIL, to_email: owner.email_id,
-            subject: `CRED-360 — Password Expired: "${pw.name}"`,
-            html_mode: true,
-            content: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-              <div style="background:#dc2626;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-                <h1 style="color:#fff;margin:0;font-size:22px;">CRED-360</h1></div>
-              <div style="background:#fff;padding:32px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
-                <h2 style="color:#dc2626;">Password Expired</h2>
-                <p style="color:#6b7280;">Your password <strong style="color:#111827;">"${pw.name}"</strong> has expired.</p>
-                <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:16px;margin:20px 0;">
-                  <p style="color:#991b1b;margin:0;">Please update this password immediately to maintain security.</p></div>
-                <div style="text-align:center;margin:24px 0;">
-                  <a href="https://cred-360-60073973215.development.catalystserverless.in/app/#/passwords"
-                     style="background:#dc2626;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">
-                    Update Password Now</a></div></div></div>`,
-          });
+          await sendTemplated(catalystApp, owner.email_id, emailTpl.passwordExpired({
+            name: pw.name, link: `${APP_URL}#/passwords`,
+          }));
         } catch(e) { console.log('Expired email error:', e.message); }
       }
 
       if (diffDays === 7 || diffDays === 1) {
         try {
-          await mail.sendMail({
-            from_email: FROM_EMAIL, to_email: owner.email_id,
-            subject: `CRED-360 — Password Expiring in ${diffDays} day${diffDays > 1 ? 's' : ''}: "${pw.name}"`,
-            html_mode: true,
-            content: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-              <div style="background:#7c3aed;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-                <h1 style="color:#fff;margin:0;font-size:22px;">CRED-360</h1></div>
-              <div style="background:#fff;padding:32px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
-                <h2 style="color:#d97706;">Password Expiring Soon</h2>
-                <p style="color:#6b7280;">Your password <strong style="color:#111827;">"${pw.name}"</strong>
-                  will expire in <strong style="color:#d97706;">${diffDays} day${diffDays > 1 ? 's' : ''}</strong>.</p>
-                <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:16px;margin:20px 0;">
-                  <p style="color:#92400e;margin:0;">Expiry Date: <strong>${expiryDate.toLocaleDateString()}</strong><br/>
-                    Please update this password before it expires.</p></div>
-                <div style="text-align:center;margin:24px 0;">
-                  <a href="https://cred-360-60073973215.development.catalystserverless.in/app/#/passwords"
-                     style="background:#7c3aed;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">
-                    Update Password</a></div></div></div>`,
-          });
+          await sendTemplated(catalystApp, owner.email_id, emailTpl.passwordExpiring({
+            name: pw.name, days: diffDays, expiryDate: pw.expiry_date, link: `${APP_URL}#/passwords`,
+          }));
           reminded++;
         } catch(e) { console.log('Reminder email error:', e.message); }
       }

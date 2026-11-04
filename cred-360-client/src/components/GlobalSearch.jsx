@@ -23,6 +23,7 @@ const GlobalSearch = ({ open, onClose }) => {
   const inputRef    = useRef(null);
   const debounceRef = useRef(null);
   const navigate    = useNavigate();
+  const [anchor, setAnchor] = useState(null);
 
   const runSearch = useCallback(async (q) => {
     if (q.trim().length < 2) { setResults(null); setLoading(false); return; }
@@ -51,6 +52,16 @@ const GlobalSearch = ({ open, onClose }) => {
       setQuery('');
       setResults(null);
       setActiveIndex(-1);
+      // Expand from the navbar search box position (Zoho-style)
+      const el = document.querySelector('.navbar-search-pill');
+      const vw = window.innerWidth;
+      const width = Math.min(720, vw - 16);
+      if (el && vw > 640) {
+        const r = el.getBoundingClientRect();
+        setAnchor({ top: Math.max(r.top - 2, 4), left: Math.max(8, Math.min(r.left, vw - width - 8)), width });
+      } else {
+        setAnchor({ top: 8, left: Math.max(8, (vw - width) / 2), width });
+      }
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
@@ -122,13 +133,18 @@ const GlobalSearch = ({ open, onClose }) => {
 
   return (
     <div className="gs-modal-backdrop" onMouseDown={close}>
-      <div className="gs-modal" onMouseDown={e => e.stopPropagation()}>
+      <div
+        className="gs-modal"
+        style={anchor ? { top: anchor.top, left: anchor.left, width: anchor.width } : undefined}
+        onMouseDown={e => e.stopPropagation()}
+      >
         <div className="gs-modal-input-row">
           <RiSearchLine size={18} className="gs-search-icon" />
           <input
             ref={inputRef}
             className="gs-modal-input"
             placeholder="Search passwords, folders, teams, users…"
+            autoComplete="off"
             value={query}
             onChange={e => { setQuery(e.target.value); setActiveIndex(-1); }}
             onKeyDown={handleKeyDown}
