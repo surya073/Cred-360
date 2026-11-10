@@ -548,3 +548,14 @@
 @media (max-width: 768px) {
   .chat-thread { width: 100%; left: 0; }
 }
+
+/* short screens (laptops): give the messages more room */
+@media (max-height: 780px) {
+  .team-chat.wa .chat-header { padding: 6px 12px; gap: 10px; }
+  .team-chat.wa .chat-group-avatar { width: 34px; height: 34px; }
+  .team-chat.wa .chat-header-title { font-size: 14.5px; }
+  .team-chat.wa .chat-header-sub { font-size: 12px; margin-top: 0; }
+  .team-chat.wa .chat-pinbar { padding: 4px 12px; }
+  .team-chat.wa .chat-input-bar { padding: 6px 10px; }
+  .team-chat.wa .chat-messages { padding-top: 10px; }
+}

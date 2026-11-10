@@ -14,6 +14,7 @@ import EmojiPicker from './chat/EmojiPicker';
 import PollModal from './chat/PollModal';
 import { QUICK_REACTIONS } from './chat/emojiData';
 import { buildChatState, previewOf, isContent } from './chat/chatModel';
+import { subscribe, onLiveChange, isLive } from '../services/realtime';
 import {
   API, STREAM_API, cmpMsg, stampOf, rewind, utcNow, sortMessages, mergeMessages, groupByDay,
   formatFileSize, wrapSelection, prefixLines,
@@ -251,57 +252,33 @@ const TeamChat = ({ team, currentUser, members }) => {
     };
   }, [loadInitial]);
 
-  // Optional Data Streams connection. The stream only carries a content-free "something
-  // new in team X" ping; the messages themselves still come from the authenticated API.
-  // Any failure here is silent — the chat keeps working without it.
+  // Live updates come from the app-wide shared socket (services/realtime). The channel only
+  // carries content-free pings; messages themselves are fetched through the authenticated API.
   useEffect(() => {
-    let socket = null;
-    let cancelled = false;
-
-    const setLiveState = (v) => { liveRef.current = v; if (!cancelled) setLive(v); };
-
-    (async () => {
-      try {
-        const res = await axios.get(`${STREAM_API}/api/chat/stream`, { fresh: true });
-        if (cancelled || !res.data?.enabled || !res.data.tokens) return;
-        const t = res.data.tokens;
-        const { DataStreamsWebSocket } = await import('@zcatalyst/datastreams');
-        if (cancelled) return;
-
-        socket = new DataStreamsWebSocket({ url: t.url, zuid: t['wss-id'], key: t.key });
-        socket.on('open', () => { socket.subscribe('0'); setLiveState(true); if (Date.now() - lastFetchRef.current > 10000) syncRef.current?.(); /* catch up after a reconnect */ });
-        socket.on('message', (evt) => {
-          try { socket.sendAck(); } catch (e) { /* ignore */ }
-          let p = null;
-          try { p = typeof evt?.data === 'string' ? JSON.parse(evt.data) : evt?.data; } catch (e) { /* ignore */ }
-          if (p && String(p.uid) === myId) return; // my own action echoing back
-          if (p?.t === 'read') {
-            // someone read the chat: tick my messages locally, zero requests
-            if (p.team_id === undefined || String(p.team_id) === teamIdRef.current) {
-              const uid = String(p.uid);
-              setMessages(prev => prev.map(m => {
-                if (String(m.sender_id) !== myId) return m;
-                const have = (m.read_by || '').split(',').map(x => x.trim());
-                return have.includes(uid) ? m : { ...m, read_by: [m.read_by, uid].filter(Boolean).join(',') };
-              }));
-            }
-            return;
-          }
-          // new message / reaction / vote / pin (or unparsable ping): fetch only what's newer
-          if (!p || String(p.team_id) === teamIdRef.current) syncRef.current?.();
-        });
-        socket.on('error', () => setLiveState(false));
-        socket.on('close', () => setLiveState(false));
-      } catch (e) {
-        setLiveState(false);
+    const setLiveState = (v) => { liveRef.current = v; setLive(v); };
+    setLiveState(isLive());
+    const offLive = onLiveChange((v) => {
+      setLiveState(v);
+      if (v && Date.now() - lastFetchRef.current > 10000) syncRef.current?.(); // catch up after a reconnect
+    });
+    const offPing = subscribe((p) => {
+      if (p?.t === 'notif') return; // addressed to the notification bell, not the chat
+      if (p?.t === 'read') {
+        // someone read the chat: tick my messages locally, zero requests
+        if (p.team_id === undefined || String(p.team_id) === teamIdRef.current) {
+          const uid = String(p.uid);
+          setMessages(prev => prev.map(m => {
+            if (String(m.sender_id) !== myId) return m;
+            const have = (m.read_by || '').split(',').map(x => x.trim());
+            return have.includes(uid) ? m : { ...m, read_by: [m.read_by, uid].filter(Boolean).join(',') };
+          }));
+        }
+        return;
       }
-    })();
-
-    return () => {
-      cancelled = true;
-      liveRef.current = false;
-      try { socket?.close(); } catch (e) { /* ignore */ }
-    };
+      // new message / reaction / vote / pin (or unparsable ping): fetch only what's newer
+      if (!p || String(p.team_id) === teamIdRef.current) syncRef.current?.();
+    });
+    return () => { offLive(); offPing(); liveRef.current = false; };
   }, [myId]);
 
   // ── scrolling ───────────────────────────────────────────────────────────────

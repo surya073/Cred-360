@@ -40,7 +40,7 @@ Components hardcode these base paths in a per-file `const API = ...` (no central
 
 ## Data (Catalyst Data Store, queried with ZCQL)
 
-Tables used: `Passwords`, `PasswordShares`, `Folders`, `Teams`, `TeamMembers`, `Users`, `ExternalUsers`, `Categories`, `ActivityLogs`, `NotificationEvents`.
+Tables used: `Passwords`, `PasswordShares`, `Folders`, `Teams`, `TeamMembers`, `Users`, `ExternalUsers`, `Categories`, `ActivityLogs`, `TeamMessages`, `Notification` (NOT `NotificationEvents` - that table does not exist; it silently broke every notification until fixed).
 - Folder shares live in `PasswordShares` with `share_type = 'folder'`, and the folder id is stored in the `password_id` column.
 - Share `permissions` is a comma-separated string (`view,edit,delete`); `expiry` is a UTC `YYYY-MM-DD HH:mm:ss` string.
 - ZCQL results are wrapped by table name (`row.Passwords || row`); code consistently unwraps this way.
@@ -53,7 +53,9 @@ Tables used: `Passwords`, `PasswordShares`, `Folders`, `Teams`, `TeamMembers`, `
 - Access to shared items goes through `userCanOnPassword` / `userCanOnFolder` in `shared-utils/permissions.js` (owner, direct share, team share, folder share including descendant folders). Reuse these instead of reimplementing checks.
 - External shares: token + passphrase, with rate limiting (`checkRateLimit`, `recordFailedAttempt`, `clearAttempts`).
 - Secrets are encrypted server-side with AES-256-GCM (`shared-utils/encryption.js`, format `iv:authTag:ciphertext` hex). `decrypt` returns non-matching legacy plaintext unchanged. Requires `ENCRYPTION_KEY` (64 hex chars) env var, which is set only in `cred_360_function/catalyst-config.json`. The people and extras functions have empty `env_variables`, so they cannot encrypt or decrypt unless it is set for them.
-- Activity logging is fire-and-forget via `logActivity`; notifications go through `pushNotification`.
+- Activity logging is fire-and-forget via `logActivity`. Notifications go through `notify()` / `pushNotification` in `shared-utils/helpers.js`: ONE row PER RECIPIENT in `Notification` (`user_id`, `type`, `message` JSON, `is_read`, `created_time`), teams expanded to members, actor never notified. Routes return the notified ids as `notify_to`; `services/api.js` relays them as a content-free socket ping.
+- **Roles & permissions** live in `shared-utils/roles.js` (one matrix, served by `GET /api/roles`, enforced with `can(user, key)`). Team-level rights (edit/delete/toggleActive/addMember) stay per membership on `TeamMembers.permissions`.
+- Every function wraps `catalyst.initialize(req)` as `initApp(req)`, which adds a lazy admin-scoped `app.__admin`. System writes (notifications, audit log) and File Store use it because ordinary roles have no insert/File Store permission.
 
 ## Gotchas
 
@@ -62,7 +64,9 @@ Tables used: `Passwords`, `PasswordShares`, `Folders`, `Teams`, `TeamMembers`, `
 3. **SQL built by string interpolation.** ZCQL queries are assembled with template strings (`WHERE x = '${val}'`). Escape or validate any user-supplied value (see `escapeLike` in helpers) when adding queries.
 4. Hardcoded environment ids (role ids, `PROFILE_FOLDER_ID`, `APP_URL`) in `shared-utils/constants.js` and at the top of `cred_360_function/index.js` (duplicated there) are Development values. Production will need different ones.
 5. `GET` responses on the client are cached for 30s. Pass `{ fresh: true }` for data that must be current, and add new volatile endpoints to `NO_CACHE` in `api.js`.
-6. `cred-360-client/build/`, `node_modules/`, `.build/` and `.env*` are gitignored.
+6. Catalyst rejects `+` in email IDs (plus-addressing). The invite role-id map gives Employee and Intern the same id, so invite re-applies the chosen role after registering.
+7. Realtime: one shared Data Streams socket per browser (`services/realtime.js`: Web Locks + BroadcastChannel). The client library reconnects by itself (first attempt often closes 1006), so close/error must not tear the socket down.
+8. `cred-360-client/build/`, `node_modules/`, `.build/` and `.env*` are gitignored.
 
 ## Commands
 

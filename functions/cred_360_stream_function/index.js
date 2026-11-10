@@ -104,4 +104,25 @@ app.post('/api/ping', async (req, res) => {
   }
 });
 
+// "You have something new" for specific people. Content-free: just the user ids to alert; each
+// recipient's browser then fetches its own notifications through the authenticated API.
+app.post('/api/ping/notify', async (req, res) => {
+  try {
+    const catalystApp = catalyst.initialize(req);
+    const user = await currentUser(req, catalystApp);
+    if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!DataStreamsAdmin) return res.json({ success: false, reason: loadError || 'sdk unavailable' });
+
+    const to = [...new Set((Array.isArray(req.body?.to) ? req.body.to : []).map(String).filter(id => ID_RE.test(id)))].slice(0, 50);
+    if (!to.length) return res.status(400).json({ success: false, error: 'Invalid ping' });
+    if (limited(String(user.user_id))) return res.status(429).json({ success: false, error: 'Slow down' });
+
+    await streamsFor(req).publishData(CHANNEL, JSON.stringify({ t: 'notif', to, uid: String(user.user_id) }));
+    res.json({ success: true });
+  } catch (e) {
+    console.log('notify ping failed:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 module.exports = app;

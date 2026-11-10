@@ -1,0 +1,56 @@
+/* ============================================================
+   Users: invite / edit forms and the Roles & permissions tab
+   ============================================================ */
+
+.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 520px) { .form-row-2 { grid-template-columns: 1fr; } }
+
+.form-input.has-error { border-color: var(--danger, #ef4444); }
+.field-error { display: block; margin-top: 4px; font-size: 12px; color: var(--danger, #ef4444); }
+.role-hint { margin: 8px 0 0; font-size: 12.5px; color: var(--text-muted); }
+
+.team-pick { display: flex; flex-wrap: wrap; gap: 8px; max-height: 120px; overflow-y: auto; }
+.team-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 16px; cursor: pointer;
+  border: 1px solid var(--border); background: none; color: var(--text-secondary); font-size: 13px;
+}
+.team-chip:hover { background: var(--bg-tertiary); }
+.team-chip.on { border-color: var(--primary); background: var(--primary-light, rgba(124, 58, 237, 0.14)); color: var(--primary); font-weight: 600; }
+
+.status-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-secondary);
+}
+.status-row > div { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.status-row b { color: var(--text-primary); }
+.status-row span { color: var(--text-muted); font-size: 12.5px; }
+
+/* ── Roles & permissions ── */
+.roles-panel { display: flex; flex-direction: column; gap: 18px; }
+.roles-intro { margin: 0; font-size: 13.5px; color: var(--text-secondary); max-width: 780px; }
+.roles-intro b { color: var(--text-primary); }
+.roles-foot { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; color: var(--text-muted); }
+
+.role-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.role-card {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 12px;
+  background: var(--bg-secondary); border: 1px solid var(--border); border-top-width: 3px;
+}
+.role-card.mine { box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.35); }
+.role-card-head { display: flex; align-items: center; justify-content: space-between; }
+.role-card p { margin: 0; font-size: 13px; color: var(--text-secondary); line-height: 1.45; flex: 1; }
+.role-card-foot { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); }
+.role-you { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 9px; background: var(--primary); color: #fff; }
+
+.matrix-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-secondary); }
+.matrix { width: 100%; border-collapse: collapse; min-width: 640px; }
+.matrix th, .matrix td { padding: 11px 14px; border-bottom: 1px solid var(--border); text-align: center; }
+.matrix thead th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); background: var(--bg-tertiary); position: sticky; top: 0; }
+.matrix th.mine, .matrix td.mine { background: rgba(124, 58, 237, 0.08); }
+.matrix .matrix-perm { text-align: left; min-width: 260px; }
+.matrix-group td { text-align: left; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--primary); background: var(--bg-tertiary); padding: 7px 14px; }
+.matrix-label { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.matrix-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.matrix-cell .yes { color: #16a34a; }
+.matrix-cell .no { color: var(--text-muted); opacity: 0.45; }
+.matrix tbody tr:last-child td { border-bottom: 0; }

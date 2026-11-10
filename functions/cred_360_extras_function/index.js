@@ -1,6 +1,16 @@
 'use strict';
 const express  = require('express');
 const catalyst = require('zcatalyst-sdk-node');
+// App handle for a request. `__admin` is the same app with the platform's own (admin) scope, created
+// only when used. System-written data (notifications, audit log) goes through it, because ordinary
+// roles (Team Lead, Employee...) have no insert permission on those tables.
+const initApp = (req) => {
+  const app = catalyst.initialize(req);
+  let admin;
+  Object.defineProperty(app, '__admin', { get: () => (admin = admin || catalyst.initialize(req, { scope: 'admin' })) });
+  return app;
+};
+
 
 const app = express();
 app.use(express.json());
@@ -16,7 +26,7 @@ const { permList } = require('shared-utils/permissions');
 // ── EXTERNAL USERS ────────────────────────────────────────────────────────────
 app.get('/api/external-users', async (req, res) => {
   try {
-	const catalystApp = catalyst.initialize(req);
+	const catalystApp = initApp(req);
 	const user = await getCurrentUser(req, catalystApp);
 	if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -112,7 +122,7 @@ const result = filtered.map(u => {
 
 app.delete('/api/external-users/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -143,7 +153,7 @@ app.delete('/api/external-users/:id', async (req, res) => {
 
 app.post('/api/external-users/manual', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -177,7 +187,7 @@ app.post('/api/external-users/manual', async (req, res) => {
 
 app.put('/api/external-users/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -214,7 +224,7 @@ app.put('/api/external-users/:id', async (req, res) => {
 
 app.put('/api/external-users/:id/favorite', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -229,7 +239,7 @@ app.put('/api/external-users/:id/favorite', async (req, res) => {
 
 app.get('/api/external-users/:id/analytics', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -297,7 +307,7 @@ app.get('/api/external-users/:id/analytics', async (req, res) => {
 
 app.get('/api/search', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -384,7 +394,7 @@ app.get('/api/search', async (req, res) => {
 
 app.get('/api/users/:id/analytics', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 

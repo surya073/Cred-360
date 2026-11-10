@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProfileProvider } from './context/ProfileContext';
 import { ShareNotifProvider } from './context/ShareNotifContext';
 import { NavbarProvider } from './context/NavbarContext';
+import { NotificationProvider } from './context/NotificationContext';
 import { TimezoneProvider, useTimeZone } from './context/TimezoneContext';
 
 import Navbar from './components/Navbar';
@@ -31,6 +32,8 @@ import './styles/toast.css';
 import './styles/datatable.css';
 import './styles/premium.css';
 import './styles/chat.css';
+import './styles/notifications.css';
+import './styles/users-roles.css';
 
 // Route-level code splitting: each page loads on demand
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -128,6 +131,7 @@ const AuthenticatedRoutes = () => {
 
   return (
     // keyed by time zone so every page re-renders its dates when the zone changes
+    <NotificationProvider user={user}>
     <Routes key={timeZone}>
       <Route element={<AppLayout {...layoutProps} />}>
         <Route path="/" element={<Dashboard />} />
@@ -143,6 +147,7 @@ const AuthenticatedRoutes = () => {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </NotificationProvider>
   );
 };
 

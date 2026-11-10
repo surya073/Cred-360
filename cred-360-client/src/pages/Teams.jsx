@@ -12,6 +12,7 @@ import {
   RiFilter3Line, RiArrowDownSLine, RiPauseCircleLine
 } from 'react-icons/ri';
 import TeamChat from '../components/TeamChat';
+import useFitHeight from '../utils/useFitHeight';
 import '../styles/teams.css';
 
 const API_CORE   = '/server/cred_360_function';
@@ -112,6 +113,10 @@ const Teams = () => {
   const [search, setSearch]         = useState('');
   const [activeTeam, setActiveTeam] = useState(null);
   const [activeTab, setActiveTab]   = useState('members');
+
+  // The page fits the viewport: header stays put, the content below scrolls inside itself.
+  const pageRef = useRef(null);
+  const pageHeight = useFitHeight(pageRef, [activeTeam ? activeTeam.ROWID : null, loading]);
 
   const [sharedPasswords, setSharedPasswords]   = useState([]);
   const [sharedLoading, setSharedLoading]       = useState(false);
@@ -451,11 +456,11 @@ const Teams = () => {
     const canAddMember    = isAdmin || !!myPerms.addMember;
 
     return (
-      <div>
+      <div ref={pageRef} className="team-page" style={pageHeight ? { height: pageHeight } : undefined}>
         <Toast toasts={toasts} removeToast={removeToast} />
 
-        <div className="page-header flex-between">
-          <div>
+        <div className="team-head">
+          <div className="team-head-info">
             <div className="breadcrumb">
               <span className="breadcrumb-link" onClick={() => setActiveTeam(null)}>
                 Teams
@@ -468,14 +473,13 @@ const Teams = () => {
               {activeTeam.description || 'No description'} · {teamMembers.length} members
             </p>
           </div>
+          <div className="team-head-actions">
           {canAddMember && activeTab === 'members' && (
             <button className="btn btn-primary" onClick={openAddMemberModal}>
               <RiUserAddLine size={16} /> Add Member
             </button>
           )}
-        </div>
-
-        <div className="pw-tabs" style={{ marginBottom: 16 }}>
+        <div className="pw-tabs">
           <button
             className={`pw-tab ${activeTab === 'members' ? 'active' : ''}`}
             onClick={() => setActiveTab('members')}
@@ -504,7 +508,10 @@ const Teams = () => {
             <RiSendPlaneLine size={15} /> Group Chat
           </button>
         </div>
+          </div>
+        </div>
 
+        <div className="team-body">
         {activeTab === 'members' && (
           <div className="card">
             {teamMembers.length === 0 ? (
@@ -844,6 +851,7 @@ const Teams = () => {
             members={getTeamMembers(activeTeam.ROWID)}
           />
         )}
+        </div>
 
         {showAddMember && (
           <div className="modal-overlay" onClick={() => setShowAddMember(false)}>
@@ -979,16 +987,28 @@ const Teams = () => {
 
   // ── Teams grid view ──
   return (
-    <div>
+    <div ref={pageRef} className="team-page" style={pageHeight ? { height: pageHeight } : undefined}>
       <Toast toasts={toasts} removeToast={removeToast} />
 
-      <div className="page-header flex-between">
-        <div>
+      {/* one compact row: title on the left, search / sort / actions on the right */}
+      <div className="team-head">
+        <div className="team-head-info">
           <h1 className="page-title">Teams</h1>
           <p className="page-subtitle">{teams.length} teams in your organization</p>
         </div>
-        <div className="flex gap-8">
-          <button className="btn btn-secondary" onClick={fetchData}>
+        <div className="team-head-actions">
+          <div className="search-box team-search">
+            <RiSearchLine size={16} className="search-icon" />
+            <input
+              type="text"
+              placeholder="Search teams..."
+              value={search}
+              onChange={e => { setSearch(e.target.value); setTeamPage(1); }}
+              className="search-input"
+            />
+          </div>
+          <SortDropdown sortBy={sortBy} setSortBy={setSortBy} onChange={() => setTeamPage(1)} />
+          <button className="btn btn-secondary" onClick={fetchData} title="Refresh">
             <RiRefreshLine size={16} />
           </button>
           {isAdmin && (
@@ -999,20 +1019,7 @@ const Teams = () => {
         </div>
       </div>
 
-      <div className="table-toolbar" style={{ marginBottom: 16 }}>
-        <div className="search-box">
-          <RiSearchLine size={16} className="search-icon" />
-          <input
-            type="text"
-            placeholder="Search teams..."
-            value={search}
-            onChange={e => { setSearch(e.target.value); setTeamPage(1); }}
-            className="search-input"
-          />
-        </div>
-        <SortDropdown sortBy={sortBy} setSortBy={setSortBy} onChange={() => setTeamPage(1)} />
-      </div>
-
+      <div className="team-body">
       {loading ? (
         <div className="folders-grid">
           {[...Array(4)].map((_, i) => (
@@ -1137,6 +1144,7 @@ const Teams = () => {
           )}
         </>
       )}
+      </div>
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>

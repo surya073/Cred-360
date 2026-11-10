@@ -1,14 +1,25 @@
 'use strict';
 const express  = require('express');
 const catalyst = require('zcatalyst-sdk-node');
+// App handle for a request. `__admin` is the same app with the platform's own (admin) scope, created
+// only when used. System-written data (notifications, audit log) goes through it, because ordinary
+// roles (Team Lead, Employee...) have no insert permission on those tables.
+const initApp = (req) => {
+  const app = catalyst.initialize(req);
+  let admin;
+  Object.defineProperty(app, '__admin', { get: () => (admin = admin || catalyst.initialize(req, { scope: 'admin' })) });
+  return app;
+};
+
 const { encrypt, decrypt } = require('shared-utils/encryption');
 
 const app = express();
 app.use(express.json());
 
 const { ROLE_MAP, ROLE_ID_MAP, INVITE_ROLE_ID_MAP, APP_URL } = require('shared-utils/constants');
-const { getCurrentUser, now, logActivity, mapBy, pushNotification, escapeLike, appRole, isAdmin: isAdminUser, getAllUsersCached, getProfileImageRowsCached, invalidateDirectory, selectAll } = require('shared-utils/helpers');
+const { getCurrentUser, now, logActivity, mapBy, pushNotification, notify, displayName, escapeLike, appRole, isAdmin: isAdminUser, getAllUsersCached, getProfileImageRowsCached, invalidateDirectory, selectAll } = require('shared-utils/helpers');
 const { permList, shareIsActive } = require('shared-utils/permissions');
+const { ROLES, ROLE_INFO, PERMISSIONS, ROLE_PERMISSIONS, ASSIGNABLE_ROLES, roleOf, can, canAssignRole } = require('shared-utils/roles');
 
 async function getMemberPermissions(catalystApp, teamId, userId) {
   const zcql = catalystApp.zcql();
@@ -22,9 +33,35 @@ async function getMemberPermissions(catalystApp, teamId, userId) {
 
 // ── USERS ─────────────────────────────────────────────────────────────────────
 
+// People's names: letters (any script), spaces, apostrophes, dots and hyphens.
+const NAME_RE = /^[\p{L}][\p{L}\p{M}'.\- ]*$/u;
+const cleanName = (s) => String(s ?? '').trim().replace(/\s+/g, ' ');
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+const formatUser = (u, profileImages = {}) => ({
+  ROWID:         u.user_id,
+  first_name:    u.first_name || '',
+  last_name:     u.last_name || '',
+  name:          `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+  email:         u.email_id,
+  role:          ROLE_MAP[u.role_details?.role_name] || 'Employee',
+  profile_image: profileImages[u.user_id] || null,
+  joined:        u.created_time || '',
+  status:        String(u.status || 'ACTIVE').toUpperCase(),
+  confirmed:     u.is_confirmed !== false,
+});
+
+// Admins (except the actor) — who hears about user-management changes.
+async function adminRecipients(catalystApp, exceptId) {
+  const users = await getAllUsersCached(catalystApp).catch(() => []);
+  return users
+    .filter(u => ROLE_MAP[u.role_details?.role_name] === 'Admin' && String(u.user_id) !== String(exceptId))
+    .map(u => ({ type: 'user', id: String(u.user_id) }));
+}
+
 app.get('/api/users', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -39,65 +76,145 @@ app.get('/api/users', async (req, res) => {
       if (u.user_id && u.profile_image) profileImages[u.user_id] = u.profile_image;
     });
 
-    const formatted = allUsers.map(u => ({
-      ROWID:         u.user_id,
-      name:          `${u.first_name || ''} ${u.last_name || ''}`.trim(),
-      email:         u.email_id,
-      role:          ROLE_MAP[u.role_details?.role_name] || 'Employee',
-      profile_image: profileImages[u.user_id] || null,
-      joined:        u.created_time || '',
-      status:        String(u.status || 'ACTIVE').toUpperCase(),
-    }));
-
-    res.json({ success: true, data: formatted });
+    res.json({ success: true, data: allUsers.map(u => formatUser(u, profileImages)) });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-app.put('/api/users/:id/role', async (req, res) => {
+// Roles, what each may do, and what *I* may do — the UI renders this, the server enforces it.
+app.get('/api/roles', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-    // Only admins may change roles — otherwise anyone could promote themselves.
-    if (!isAdminUser(user)) return res.status(403).json({ success: false, error: 'Admin access required' });
-    if (String(req.params.id) === String(user.user_id)) {
-      return res.status(400).json({ success: false, error: 'You cannot change your own role' });
+    const users = await getAllUsersCached(catalystApp).catch(() => []);
+    const counts = {};
+    users.forEach(u => { const r = ROLE_MAP[u.role_details?.role_name] || 'Employee'; counts[r] = (counts[r] || 0) + 1; });
+
+    res.json({
+      success: true,
+      roles: ROLES.map(name => ({ name, description: ROLE_INFO[name].description, permissions: ROLE_PERMISSIONS[name], users: counts[name] || 0 })),
+      permissions: PERMISSIONS,
+      me: { role: roleOf(user), permissions: ROLE_PERMISSIONS[roleOf(user)] || [], assignable: ASSIGNABLE_ROLES[roleOf(user)] || [] },
+    });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Update another user's name and/or role. Existing fields are always re-sent, otherwise
+// Catalyst would blank anything left out (that used to wipe last names on role changes).
+async function applyUserUpdate(catalystApp, actor, targetId, patch) {
+  const um = catalystApp.userManagement();
+  const target = await um.getUserDetails(targetId).catch(() => null);
+  if (!target) return { status: 404, error: 'User not found' };
+
+  const next = {
+    email_id:   target.email_id,
+    first_name: patch.first_name !== undefined ? patch.first_name : (target.first_name || ''),
+    last_name:  patch.last_name  !== undefined ? patch.last_name  : (target.last_name  || ''),
+  };
+  const oldRole = ROLE_MAP[target.role_details?.role_name] || 'Employee';
+  if (patch.role && patch.role !== oldRole) next.role_id = ROLE_ID_MAP[patch.role];
+  await um.updateUserDetails(String(targetId), next);
+  return { target, oldRole, next };
+}
+
+const handleUserUpdate = async (req, res) => {
+  try {
+    const catalystApp = initApp(req);
+    const user = await getCurrentUser(req, catalystApp);
+    if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'users.edit')) return res.status(403).json({ success: false, error: 'You do not have permission to edit users' });
+
+    const patch = {};
+    if (req.body.first_name !== undefined) {
+      patch.first_name = cleanName(req.body.first_name);
+      if (!patch.first_name || patch.first_name.length > 50 || !NAME_RE.test(patch.first_name)) {
+        return res.status(400).json({ success: false, error: 'Enter a valid first name' });
+      }
+    }
+    if (req.body.last_name !== undefined) {
+      patch.last_name = cleanName(req.body.last_name);
+      if (patch.last_name && (patch.last_name.length > 50 || !NAME_RE.test(patch.last_name))) {
+        return res.status(400).json({ success: false, error: 'Enter a valid last name' });
+      }
+    }
+    if (req.body.role !== undefined) {
+      if (!can(user, 'users.roles')) return res.status(403).json({ success: false, error: 'You do not have permission to change roles' });
+      if (String(req.params.id) === String(user.user_id)) return res.status(400).json({ success: false, error: 'You cannot change your own role' });
+      if (!ROLE_ID_MAP[req.body.role]) return res.status(400).json({ success: false, error: 'Invalid role' });
+      patch.role = req.body.role;
+    }
+    if (!Object.keys(patch).length) return res.status(400).json({ success: false, error: 'Nothing to update' });
+
+    const out = await applyUserUpdate(catalystApp, user, req.params.id, patch);
+    if (out.error) return res.status(out.status).json({ success: false, error: out.error });
+
+    const actor = displayName(user);
+    const who = `${out.next.first_name} ${out.next.last_name}`.trim() || out.next.email_id;
+    const notify_to = [];
+    if (patch.role && patch.role !== out.oldRole) {
+      notify_to.push(...await notify(catalystApp, {
+        event_type: 'role_changed', ref_id: req.params.id, ref_name: who, actor_id: user.user_id, actor_name: actor,
+        title: 'Your role changed', details: `${actor} changed your role from ${out.oldRole} to ${patch.role}`,
+      }, [{ type: 'user', id: req.params.id }]));
+      logActivity(catalystApp, {
+        action: 'Role changed', user_id: user.user_id, user_email: user.email_id, password_id: '',
+        details: `Changed role of ${out.next.email_id} from ${out.oldRole} to ${patch.role}`,
+      });
+    }
+    if (patch.first_name !== undefined || patch.last_name !== undefined) {
+      notify_to.push(...await notify(catalystApp, {
+        event_type: 'profile_updated', ref_id: req.params.id, ref_name: who, actor_id: user.user_id, actor_name: actor,
+        title: 'Your profile was updated', details: `${actor} updated your name to ${who}`,
+      }, [{ type: 'user', id: req.params.id }]));
+      logActivity(catalystApp, {
+        action: 'User updated', user_id: user.user_id, user_email: user.email_id, password_id: '',
+        details: `Updated name of ${out.next.email_id} to ${who}`,
+      });
     }
 
-    const roleId = ROLE_ID_MAP[req.body.role];
-    if (!roleId) return res.status(400).json({ success: false, error: 'Invalid role' });
+    invalidateDirectory();
+    res.json({ success: true, notify_to: [...new Set(notify_to)] });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+};
 
-    const userManagement = catalystApp.userManagement();
-    const allUsers       = await userManagement.getAllUsers();
-    const targetUser     = allUsers.find(u =>
-      String(u.user_details?.user_id || u.user_id || u.userId) === String(req.params.id)
-    );
-    if (!targetUser) return res.status(404).json({ success: false, error: 'User not found' });
+app.put('/api/users/:id', handleUserUpdate);
+// Kept for existing callers: { role } only.
+app.put('/api/users/:id/role', (req, res) => { req.body = { role: req.body.role }; return handleUserUpdate(req, res); });
 
-    const email      = targetUser.user_details?.email_id  || targetUser.email_id;
-    const first_name = targetUser.user_details?.first_name || targetUser.first_name || 'User';
+app.put('/api/users/:id/status', async (req, res) => {
+  try {
+    const catalystApp = initApp(req);
+    const user = await getCurrentUser(req, catalystApp);
+    if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'users.disable')) return res.status(403).json({ success: false, error: 'You do not have permission to enable or disable users' });
+    if (String(req.params.id) === String(user.user_id)) return res.status(400).json({ success: false, error: 'You cannot disable your own account' });
 
-    await userManagement.updateUserDetails(req.params.id, { email_id: email, first_name, role_id: roleId });
+    const enable = String(req.body.status || '').toUpperCase() !== 'DISABLE';
+    const target = await catalystApp.userManagement().getUserDetails(req.params.id).catch(() => null);
+    if (!target) return res.status(404).json({ success: false, error: 'User not found' });
 
+    await catalystApp.userManagement().updateUserStatus(String(req.params.id), enable ? 'enable' : 'disable');
+
+    const actor = displayName(user), who = displayName(target);
     logActivity(catalystApp, {
-      action: 'Role changed', user_id: user.user_id, user_email: user.email_id,
-      password_id: '', details: `Changed role of ${email} to ${req.body.role}`,
+      action: enable ? 'User enabled' : 'User disabled', user_id: user.user_id, user_email: user.email_id, password_id: '',
+      details: `${enable ? 'Re-enabled' : 'Disabled'} ${target.email_id}`,
     });
+    const notify_to = await notify(catalystApp, {
+      event_type: 'user_status_changed', ref_id: req.params.id, ref_name: who, actor_id: user.user_id, actor_name: actor,
+      title: enable ? 'User re-enabled' : 'User disabled',
+      details: `${actor} ${enable ? 're-enabled' : 'disabled'} ${who}'s account`,
+    }, await adminRecipients(catalystApp, user.user_id));
 
-    await pushNotification(catalystApp, {
-      event_type: 'role_changed', recipient_type: 'user', recipient_id: req.params.id,
-      ref_id: req.params.id, ref_name: email,
-      actor_id: user.user_id,
-      actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
-      title: 'Role changed',
-      details: `Your role was changed to ${req.body.role}`,
-    });
-
-    invalidateDirectory(); // user list changed — drop the cached directory
-    res.json({ success: true });
+    invalidateDirectory();
+    res.json({ success: true, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -105,39 +222,77 @@ app.put('/api/users/:id/role', async (req, res) => {
 
 app.post('/api/users/invite', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'users.invite')) return res.status(403).json({ success: false, error: 'You do not have permission to invite users' });
 
-    // Admins can invite anyone; Team Leads may only invite Employees/Interns; everyone else cannot invite.
-    const inviterRole = appRole(user);
-    const wantedRole  = INVITE_ROLE_ID_MAP[req.body.role] ? req.body.role : 'Employee';
-    if (inviterRole !== 'Admin') {
-      if (inviterRole !== 'Team Lead') return res.status(403).json({ success: false, error: 'You do not have permission to invite users' });
-      if (wantedRole === 'Admin' || wantedRole === 'Team Lead') {
-        return res.status(403).json({ success: false, error: 'Team Leads can only invite Employees or Interns' });
+    const wantedRole = INVITE_ROLE_ID_MAP[req.body.role] ? req.body.role : 'Employee';
+    if (!canAssignRole(user, wantedRole)) {
+      return res.status(403).json({ success: false, error: `Your role cannot invite ${wantedRole}s` });
+    }
+
+    const first = cleanName(req.body.first_name);
+    const last  = cleanName(req.body.last_name);
+    if (!first || first.length > 50 || !NAME_RE.test(first)) return res.status(400).json({ success: false, error: 'Enter a valid first name' });
+    if (last && (last.length > 50 || !NAME_RE.test(last))) return res.status(400).json({ success: false, error: 'Enter a valid last name' });
+
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ success: false, error: 'Enter a valid email address' });
+    if (email.includes('+')) return res.status(400).json({ success: false, error: "Catalyst doesn't accept '+' in email addresses. Use the person's plain address." });
+
+    const existing = (await getAllUsersCached(catalystApp).catch(() => [])).find(u => String(u.email_id || '').toLowerCase() === email);
+    if (existing) return res.status(409).json({ success: false, error: 'This person is already in the workspace' });
+
+    // Optional: teams to drop the new person into (only where the inviter may add members).
+    const teamIds = [...new Set((Array.isArray(req.body.team_ids) ? req.body.team_ids : []).map(String).filter(id => /^\d{1,20}$/.test(id)))].slice(0, 10);
+    for (const tid of teamIds) {
+      if (!(await canManageTeam(catalystApp, user, tid, 'addMember'))) {
+        return res.status(403).json({ success: false, error: 'You cannot add people to one of the selected teams' });
       }
     }
 
-    const email = String(req.body.email || '').trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
-      return res.status(400).json({ success: false, error: 'Enter a valid email address' });
+    const registered = await catalystApp.userManagement().registerUser(
+      { platform_type: 'web', redirect_url: APP_URL },
+      { first_name: first, last_name: last, email_id: email, role_id: INVITE_ROLE_ID_MAP[wantedRole] }
+    );
+    const newUserId = String(registered?.user_details?.user_id || registered?.user_id || '');
+
+    // The invite role ids can collide (Employee and Intern share one), so make sure the person really
+    // got the role that was asked for.
+    let roleNote = null;
+    const assigned = ROLE_MAP[registered?.user_details?.role_details?.role_name];
+    if (newUserId && assigned !== wantedRole) {
+      try {
+        await catalystApp.userManagement().updateUserDetails(newUserId, { email_id: email, first_name: first, last_name: last, role_id: ROLE_ID_MAP[wantedRole] });
+      } catch (e) {
+        roleNote = `Invited as ${assigned || 'a default role'}; set the role to ${wantedRole} from Edit user (${e.message})`;
+      }
     }
 
-    const roleId = INVITE_ROLE_ID_MAP[wantedRole] || '46135000000013078';
+    const addedTo = [];
+    if (newUserId) {
+      const table = catalystApp.datastore().table('TeamMembers');
+      for (const tid of teamIds) {
+        await table.insertRow({
+          team_id: tid, user_id: newUserId, added_by: user.user_id, joined_time: now(),
+          permissions: JSON.stringify({ edit: false, delete: false, toggleActive: false, addMember: false }),
+        }).then(() => addedTo.push(tid)).catch(() => {});
+      }
+    }
 
-    await catalystApp.userManagement().registerUser(
-      { platform_type: 'web', redirect_url: APP_URL },
-      { first_name: email.split('@')[0], last_name: '', email_id: email, role_id: roleId }
-    );
-
+    const actor = displayName(user), who = `${first} ${last}`.trim();
     logActivity(catalystApp, {
-      action: 'User invited', user_id: user.user_id, user_email: user.email_id,
-      password_id: '', details: `Invited ${email} as ${wantedRole}`,
+      action: 'User invited', user_id: user.user_id, user_email: user.email_id, password_id: '',
+      details: `Invited ${who} (${email}) as ${wantedRole}${addedTo.length ? ` and added to ${addedTo.length} team(s)` : ''}`,
     });
+    const notify_to = await notify(catalystApp, {
+      event_type: 'user_invited', ref_id: newUserId, ref_name: who, actor_id: user.user_id, actor_name: actor,
+      title: 'User invited', details: `${actor} invited ${who} (${email}) as ${wantedRole}`,
+    }, await adminRecipients(catalystApp, user.user_id));
 
     invalidateDirectory(); // user list changed — drop the cached directory
-    res.json({ success: true, message: 'Invitation sent successfully' });
+    res.json({ success: true, message: 'Invitation sent successfully', data: { user_id: newUserId, name: who, email, role: roleNote ? assigned : wantedRole }, role_note: roleNote, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -145,16 +300,15 @@ app.post('/api/users/invite', async (req, res) => {
 
 app.delete('/api/users/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
-
-    const userRole = ROLE_MAP[user.role_details?.role_name] || 'Employee';
-    if (userRole !== 'Admin') return res.status(403).json({ success: false, error: 'Admin access required' });
+    if (!can(user, 'users.delete')) return res.status(403).json({ success: false, error: 'Admin access required' });
     if (String(req.params.id) === String(user.user_id)) {
       return res.status(400).json({ success: false, error: 'You cannot delete your own account' });
     }
 
+    const target = await catalystApp.userManagement().getUserDetails(req.params.id).catch(() => null);
     const zcql = catalystApp.zcql();
     const memberRows = await zcql.executeZCQLQuery(
       `SELECT ROWID FROM TeamMembers WHERE user_id = '${req.params.id}'`
@@ -170,11 +324,15 @@ app.delete('/api/users/:id', async (req, res) => {
     logActivity(catalystApp, {
       action: 'User deleted', user_id: user.user_id, user_email: user.email_id,
       password_id: '',
-      details: `Deleted user ID: ${req.params.id} (removed from ${memberRows.length} team(s))`,
+      details: `Deleted user ${target ? `${displayName(target)} (${target.email_id})` : `ID ${req.params.id}`} (removed from ${memberRows.length} team(s))`,
     });
+    const notify_to = await notify(catalystApp, {
+      event_type: 'user_deleted', ref_id: req.params.id, ref_name: target ? displayName(target) : '', actor_id: user.user_id, actor_name: displayName(user),
+      title: 'User removed', details: `${displayName(user)} removed ${target ? displayName(target) : 'a user'} from the workspace`,
+    }, await adminRecipients(catalystApp, user.user_id));
 
     invalidateDirectory(); // user list changed — drop the cached directory
-    res.json({ success: true });
+    res.json({ success: true, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -200,7 +358,7 @@ const enrichMembers = (memberRows, userMap, profileImages) =>
 
 app.get('/api/teams', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -261,28 +419,60 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
+const PERM_DEFS_SERVER = ['edit', 'delete', 'toggleActive', 'addMember'];
+const TEAM_PERM_LABEL = { edit: 'Edit team', delete: 'Delete team', toggleActive: 'Activate/deactivate', addMember: 'Add members' };
+// Team-level permissions (edit / delete / toggleActive / addMember) live on the membership;
+// Admins (teams.manage_all) bypass them.
+async function canManageTeam(catalystApp, user, teamId, perm) {
+  if (can(user, 'teams.manage_all')) return true;
+  const perms = await getMemberPermissions(catalystApp, teamId, user.user_id);
+  return !!perms[perm];
+}
+
+async function teamNameOf(catalystApp, teamId) {
+  const rows = await catalystApp.zcql().executeZCQLQuery(`SELECT name FROM Teams WHERE ROWID = '${teamId}'`).catch(() => []);
+  return rows[0] ? (rows[0].Teams || rows[0]).name : null;
+}
+
+async function teamMemberIds(catalystApp, teamId) {
+  const rows = await catalystApp.zcql().executeZCQLQuery(`SELECT user_id FROM TeamMembers WHERE team_id = '${teamId}'`).catch(() => []);
+  return rows.map(r => String((r.TeamMembers || r).user_id));
+}
+
+const FULL_TEAM_PERMS = { edit: true, delete: true, toggleActive: true, addMember: true };
+const cleanTeamText = (s, max) => String(s ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
+
 app.post('/api/teams', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'teams.create')) return res.status(403).json({ success: false, error: 'Your role cannot create teams' });
+
+    const name = cleanTeamText(req.body.name, 80);
+    if (!name) return res.status(400).json({ success: false, error: 'Give the team a name' });
 
     const row = await catalystApp.datastore().table('Teams').insertRow({
-      name: req.body.name, description: req.body.description || '',
+      name, description: cleanTeamText(req.body.description, 300),
       created_by: user.user_id, created_time: now(),
+    });
+
+    // The creator runs the team they created, so they get every team permission.
+    await catalystApp.datastore().table('TeamMembers').insertRow({
+      team_id: row.ROWID, user_id: user.user_id, role: 'Admin', permissions: JSON.stringify(FULL_TEAM_PERMS),
+      added_by: user.user_id, joined_time: now(),
     });
 
     logActivity(catalystApp, {
       action: 'Team created', user_id: user.user_id, user_email: user.email_id,
-      password_id: '', details: `Created team: ${req.body.name}`,
+      password_id: '', details: `Created team: ${name}`,
     });
+    const notify_to = await notify(catalystApp, {
+      event_type: 'team_created', ref_id: row.ROWID, ref_name: name, actor_id: user.user_id, actor_name: displayName(user),
+      title: 'Team created', details: `${displayName(user)} created the team "${name}"`,
+    }, await adminRecipients(catalystApp, user.user_id));
 
-    await catalystApp.datastore().table('TeamMembers').insertRow({
-      team_id: row.ROWID, user_id: user.user_id, role: 'Admin',
-      added_by: user.user_id, joined_time: now(),
-    });
-
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -290,25 +480,33 @@ app.post('/api/teams', async (req, res) => {
 
 app.put('/api/teams/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!(await canManageTeam(catalystApp, user, req.params.id, 'edit'))) {
+      return res.status(403).json({ success: false, error: 'You do not have permission to edit this team' });
+    }
+
+    const name = cleanTeamText(req.body.name, 80);
+    if (!name) return res.status(400).json({ success: false, error: 'Give the team a name' });
+    const oldName = await teamNameOf(catalystApp, req.params.id);
+    if (oldName === null) return res.status(404).json({ success: false, error: 'Team not found' });
 
     const row = await catalystApp.datastore().table('Teams').updateRow({
-      ROWID: req.params.id, name: req.body.name, description: req.body.description || '',
+      ROWID: req.params.id, name, description: cleanTeamText(req.body.description, 300),
     });
 
     logActivity(catalystApp, {
       action: 'Team updated', user_id: user.user_id, user_email: user.email_id,
-      password_id: '', details: `Updated team: ${req.body.name}`,
+      password_id: '', details: `Updated team: ${name}`,
     });
-    pushNotification(catalystApp, {
-      event_type: 'team_updated', recipient_type: 'team', recipient_id: req.params.id,
-      ref_id: req.params.id, ref_name: req.body.name, actor_id: user.user_id,
-      actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
-      title: 'Team updated', details: `Team details for "${req.body.name}" were updated`,
-    }).catch(() => {});
-    res.json({ success: true, data: row });
+    const actor = displayName(user);
+    const notify_to = await notify(catalystApp, {
+      event_type: 'team_updated', ref_id: req.params.id, ref_name: name, actor_id: user.user_id, actor_name: actor,
+      title: 'Team updated',
+      details: oldName !== name ? `${actor} renamed the team "${oldName}" to "${name}"` : `${actor} updated the details of "${name}"`,
+    }, [{ type: 'team', id: req.params.id }]);
+    res.json({ success: true, data: row, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -316,36 +514,30 @@ app.put('/api/teams/:id', async (req, res) => {
 
 app.delete('/api/teams/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!(await canManageTeam(catalystApp, user, req.params.id, 'delete'))) {
+      return res.status(403).json({ success: false, error: 'You do not have permission to delete this team' });
+    }
 
-    const rows = await catalystApp.zcql().executeZCQLQuery(
-      `SELECT name FROM Teams WHERE ROWID = '${req.params.id}'`
-    ).catch(() => []);
-    const name = rows[0] ? (rows[0].Teams || rows[0]).name : req.params.id;
-
-    const memberRows = await catalystApp.zcql().executeZCQLQuery(
-      `SELECT user_id FROM TeamMembers WHERE team_id = '${req.params.id}'`
-    ).catch(() => []);
+    const name = (await teamNameOf(catalystApp, req.params.id)) || req.params.id;
+    const members = await teamMemberIds(catalystApp, req.params.id);
 
     await catalystApp.datastore().table('Teams').deleteRow(req.params.id);
 
-    memberRows.map(r => String((r.TeamMembers || r).user_id))
-      .filter(id => id && id !== String(user.user_id))
-      .forEach(uid => pushNotification(catalystApp, {
-        event_type: 'team_deleted', recipient_type: 'user', recipient_id: uid,
-        ref_id: req.params.id, ref_name: name, actor_id: user.user_id,
-        actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
-        title: 'Team deleted', details: `The team "${name}" was deleted`,
-      }).catch(() => {}));
+    const actor = displayName(user);
+    const notify_to = await notify(catalystApp, {
+      event_type: 'team_deleted', ref_id: req.params.id, ref_name: name, actor_id: user.user_id, actor_name: actor,
+      title: 'Team deleted', details: `${actor} deleted the team "${name}"`,
+    }, members.map(id => ({ type: 'user', id })));
 
     logActivity(catalystApp, {
       action: 'Team deleted', user_id: user.user_id, user_email: user.email_id,
       password_id: '', details: `Deleted team: ${name}`,
     });
 
-    res.json({ success: true });
+    res.json({ success: true, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -355,7 +547,7 @@ app.delete('/api/teams/:id', async (req, res) => {
 
 app.post('/api/admin/cleanup-orphaned-members', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -384,7 +576,7 @@ app.post('/api/admin/cleanup-orphaned-members', async (req, res) => {
 
 app.get('/api/teams/:id/members', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -412,41 +604,49 @@ app.get('/api/teams/:id/members', async (req, res) => {
 
 app.post('/api/teams/:id/members', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
-
-    const userRole = ROLE_MAP[user.role_details?.role_name] || 'Employee';
-    if (userRole !== 'Admin') {
-      const myPerms = await getMemberPermissions(catalystApp, req.params.id, user.user_id);
-      if (!myPerms.addMember) {
-        return res.status(403).json({ success: false, error: 'You do not have permission to add members to this team' });
-      }
+    if (!(await canManageTeam(catalystApp, user, req.params.id, 'addMember'))) {
+      return res.status(403).json({ success: false, error: 'You do not have permission to add members to this team' });
     }
 
-    const zcql = catalystApp.zcql();
+    const teamName = await teamNameOf(catalystApp, req.params.id);
+    if (teamName === null) return res.status(404).json({ success: false, error: 'Team not found' });
 
-    const userIds = Array.isArray(req.body.user_ids) ? req.body.user_ids : [req.body.user_id];
+    const wanted = [...new Set((Array.isArray(req.body.user_ids) ? req.body.user_ids : [req.body.user_id]).filter(Boolean).map(String))];
+    const directory = await getAllUsersCached(catalystApp).catch(() => []);
+    const byId = mapBy(directory, u => u.user_id);
+    const already = new Set(await teamMemberIds(catalystApp, req.params.id));
+    const toAdd = wanted.filter(id => byId[id] && !already.has(id));
+    if (!toAdd.length) return res.status(400).json({ success: false, error: 'Those people are already in this team' });
+
     const permissions = JSON.stringify(req.body.permissions || { edit: false, delete: false, toggleActive: false, addMember: false });
-
     const table = catalystApp.datastore().table('TeamMembers');
-    const rows = await Promise.all(userIds.map(uid =>
+    const rows = await Promise.all(toAdd.map(uid =>
       table.insertRow({ team_id: req.params.id, user_id: uid, permissions, added_by: user.user_id, joined_time: now() })
     ));
 
-    const teamRow  = await zcql.executeZCQLQuery(`SELECT name FROM Teams WHERE ROWID = '${req.params.id}'`).catch(() => []);
-    const teamName = teamRow[0] ? (teamRow[0].Teams || teamRow[0]).name : 'a team';
+    const actor = displayName(user);
+    const addedNames = toAdd.map(id => displayName(byId[id]));
+    const listText = addedNames.length > 2 ? `${addedNames.slice(0, 2).join(', ')} and ${addedNames.length - 2} more` : addedNames.join(' and ');
 
-    await Promise.all(userIds.map(uid => pushNotification(catalystApp, {
-      event_type: 'member_added', recipient_type: 'user', recipient_id: uid,
-      ref_id: req.params.id, ref_name: teamName,
-      actor_id: user.user_id,
-      actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
-      title: 'Added to team',
-      details: `You were added to "${teamName}"`,
-    })));
+    // The newcomers hear "you were added"; everyone already in the team hears who joined.
+    const toNew = await notify(catalystApp, {
+      event_type: 'member_added', ref_id: req.params.id, ref_name: teamName, actor_id: user.user_id, actor_name: actor,
+      title: 'Added to team', details: `${actor} added you to the team "${teamName}"`,
+    }, toAdd.map(id => ({ type: 'user', id })));
+    const toExisting = await notify(catalystApp, {
+      event_type: 'team_member_joined', ref_id: req.params.id, ref_name: teamName, actor_id: user.user_id, actor_name: actor,
+      title: 'New team member', details: `${actor} added ${listText} to "${teamName}"`,
+    }, [...already].filter(id => id !== String(user.user_id)).map(id => ({ type: 'user', id })));
 
-    res.json({ success: true, data: rows });
+    logActivity(catalystApp, {
+      action: 'Member added', user_id: user.user_id, user_email: user.email_id, password_id: '',
+      details: `Added ${addedNames.join(', ')} to team "${teamName}"`,
+    });
+
+    res.json({ success: true, data: rows, notify_to: [...new Set([...toNew, ...toExisting])] });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -454,39 +654,42 @@ app.post('/api/teams/:id/members', async (req, res) => {
 
 app.delete('/api/teams/:id/members/:memberId', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
-
-    const userRole = ROLE_MAP[user.role_details?.role_name] || 'Employee';
-    if (userRole !== 'Admin') {
+    if (!can(user, 'teams.manage_all')) {
       return res.status(403).json({ success: false, error: 'Admin access required to remove members' });
     }
 
     const memberRows = await catalystApp.zcql().executeZCQLQuery(
-      `SELECT user_id FROM TeamMembers WHERE ROWID = '${req.params.memberId}'`
+      `SELECT user_id FROM TeamMembers WHERE ROWID = '${req.params.memberId}' AND team_id = '${req.params.id}'`
     ).catch(() => []);
-    const removedUserId = memberRows[0] ? (memberRows[0].TeamMembers || memberRows[0]).user_id : null;
+    const removedUserId = memberRows[0] ? String((memberRows[0].TeamMembers || memberRows[0]).user_id) : null;
+    if (!removedUserId) return res.status(404).json({ success: false, error: 'Member not found in this team' });
 
     await catalystApp.datastore().table('TeamMembers').deleteRow(req.params.memberId);
 
-    if (removedUserId) {
-      const teamRow = await catalystApp.zcql().executeZCQLQuery(
-        `SELECT name FROM Teams WHERE ROWID = '${req.params.id}'`
-      ).catch(() => []);
-      const teamName = teamRow[0] ? (teamRow[0].Teams || teamRow[0]).name : 'a team';
+    const teamName = (await teamNameOf(catalystApp, req.params.id)) || 'a team';
+    const directory = await getAllUsersCached(catalystApp).catch(() => []);
+    const removed = directory.find(u => String(u.user_id) === removedUserId);
+    const actor = displayName(user), who = removed ? displayName(removed) : 'A member';
 
-      await pushNotification(catalystApp, {
-        event_type: 'member_removed', recipient_type: 'user', recipient_id: removedUserId,
-        ref_id: req.params.id, ref_name: teamName,
-        actor_id: user.user_id,
-        actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
-        title: 'Removed from team',
-        details: `You were removed from "${teamName}"`,
-      });
-    }
+    const toRemoved = await notify(catalystApp, {
+      event_type: 'member_removed', ref_id: req.params.id, ref_name: teamName, actor_id: user.user_id, actor_name: actor,
+      title: 'Removed from team', details: `${actor} removed you from the team "${teamName}"`,
+    }, [{ type: 'user', id: removedUserId }]);
+    const rest = (await teamMemberIds(catalystApp, req.params.id)).filter(id => id !== String(user.user_id));
+    const toRest = await notify(catalystApp, {
+      event_type: 'team_member_left', ref_id: req.params.id, ref_name: teamName, actor_id: user.user_id, actor_name: actor,
+      title: 'Team member removed', details: `${actor} removed ${who} from "${teamName}"`,
+    }, rest.map(id => ({ type: 'user', id })));
 
-    res.json({ success: true });
+    logActivity(catalystApp, {
+      action: 'Member removed', user_id: user.user_id, user_email: user.email_id, password_id: '',
+      details: `Removed ${who} from team "${teamName}"`,
+    });
+
+    res.json({ success: true, notify_to: [...new Set([...toRemoved, ...toRest])] });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -494,42 +697,38 @@ app.delete('/api/teams/:id/members/:memberId', async (req, res) => {
 
 app.put('/api/teams/:teamId/members/:memberId/permissions', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
-
-    const userRole = ROLE_MAP[user.role_details?.role_name] || 'Employee';
-    if (userRole !== 'Admin') {
+    if (!can(user, 'teams.manage_all')) {
       return res.status(403).json({ success: false, error: 'Admin access required to update permissions' });
     }
 
     const memberRows = await catalystApp.zcql().executeZCQLQuery(
-      `SELECT user_id FROM TeamMembers WHERE ROWID = '${req.params.memberId}'`
+      `SELECT user_id FROM TeamMembers WHERE ROWID = '${req.params.memberId}' AND team_id = '${req.params.teamId}'`
     ).catch(() => []);
-    const targetUserId = memberRows[0] ? (memberRows[0].TeamMembers || memberRows[0]).user_id : null;
+    const targetUserId = memberRows[0] ? String((memberRows[0].TeamMembers || memberRows[0]).user_id) : null;
+    if (!targetUserId) return res.status(404).json({ success: false, error: 'Member not found in this team' });
+
+    // Only the four known flags, only booleans.
+    const incoming = req.body.permissions || {};
+    const clean = {};
+    PERM_DEFS_SERVER.forEach(k => { clean[k] = incoming[k] === true; });
 
     const row = await catalystApp.datastore().table('TeamMembers').updateRow({
-      ROWID: req.params.memberId,
-      permissions: JSON.stringify(req.body.permissions || {}),
+      ROWID: req.params.memberId, permissions: JSON.stringify(clean),
     });
 
-    if (targetUserId) {
-      const teamRow = await catalystApp.zcql().executeZCQLQuery(
-        `SELECT name FROM Teams WHERE ROWID = '${req.params.teamId}'`
-      ).catch(() => []);
-      const teamName = teamRow[0] ? (teamRow[0].Teams || teamRow[0]).name : 'a team';
+    const teamName = (await teamNameOf(catalystApp, req.params.teamId)) || 'a team';
+    const granted = PERM_DEFS_SERVER.filter(k => clean[k]).map(k => TEAM_PERM_LABEL[k]);
+    const actor = displayName(user);
+    const notify_to = await notify(catalystApp, {
+      event_type: 'permissions_updated', ref_id: req.params.teamId, ref_name: teamName, actor_id: user.user_id, actor_name: actor,
+      title: 'Team permissions updated',
+      details: `${actor} updated your permissions in "${teamName}": ${granted.length ? granted.join(', ') : 'view only'}`,
+    }, [{ type: 'user', id: targetUserId }]);
 
-      await pushNotification(catalystApp, {
-        event_type: 'permissions_updated', recipient_type: 'user', recipient_id: targetUserId,
-        ref_id: req.params.teamId, ref_name: teamName,
-        actor_id: user.user_id,
-        actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
-        title: 'Permissions updated',
-        details: `Your permissions in "${teamName}" were updated`,
-      });
-    }
-
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -537,37 +736,32 @@ app.put('/api/teams/:teamId/members/:memberId/permissions', async (req, res) => 
 
 app.put('/api/teams/:id/toggle-active', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
-
-    const userRole = ROLE_MAP[user.role_details?.role_name] || 'Employee';
-    if (userRole !== 'Admin') {
-      const myPerms = await getMemberPermissions(catalystApp, req.params.id, user.user_id);
-      if (!myPerms.toggleActive) {
-        return res.status(403).json({ success: false, error: 'You do not have permission to activate/deactivate this team' });
-      }
+    if (!(await canManageTeam(catalystApp, user, req.params.id, 'toggleActive'))) {
+      return res.status(403).json({ success: false, error: 'You do not have permission to activate/deactivate this team' });
     }
 
     const rows = await catalystApp.zcql().executeZCQLQuery(
-      `SELECT is_active FROM Teams WHERE ROWID = '${req.params.id}'`
+      `SELECT name, is_active FROM Teams WHERE ROWID = '${req.params.id}'`
     );
-    const current = rows[0] ? (rows[0].Teams || rows[0]).is_active : true;
-    const currentActive = !(current === false || current === 'false');
+    const t = rows[0] ? (rows[0].Teams || rows[0]) : null;
+    if (!t) return res.status(404).json({ success: false, error: 'Team not found' });
+    const currentActive = !(t.is_active === false || t.is_active === 'false');
     const newActive = !currentActive;
 
-    await catalystApp.datastore().table('Teams').updateRow({
-      ROWID: req.params.id, is_active: newActive,
-    });
+    await catalystApp.datastore().table('Teams').updateRow({ ROWID: req.params.id, is_active: newActive });
 
-    pushNotification(catalystApp, {
-      event_type: 'team_status_changed', recipient_type: 'team', recipient_id: req.params.id,
-      ref_id: req.params.id, actor_id: user.user_id,
-      actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
+    const actor = displayName(user);
+    const notify_to = await notify(catalystApp, {
+      event_type: 'team_status_changed', ref_id: req.params.id, ref_name: t.name, actor_id: user.user_id, actor_name: actor,
       title: newActive ? 'Team activated' : 'Team deactivated',
-      details: newActive ? 'This team is active again — shared items are accessible' : 'This team was deactivated — shared items are paused',
-    }).catch(() => {});
-    res.json({ success: true, data: { is_active: newActive } });
+      details: newActive
+        ? `${actor} activated "${t.name}" — shared items are accessible again`
+        : `${actor} deactivated "${t.name}" — shared items are paused`,
+    }, [{ type: 'team', id: req.params.id }]);
+    res.json({ success: true, data: { is_active: newActive }, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -577,7 +771,7 @@ app.put('/api/teams/:id/toggle-active', async (req, res) => {
 
 app.get('/api/teams/:id/shared-passwords', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -632,7 +826,7 @@ app.get('/api/teams/:id/shared-passwords', async (req, res) => {
 
 app.get('/api/teams/:teamId/shared-folders', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -706,157 +900,123 @@ app.get('/api/teams/:teamId/shared-folders', async (req, res) => {
 
 app.get('/api/notifications', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
     const zcql = catalystApp.zcql();
-    const now2 = new Date();
+    const me = String(user.user_id);
 
-    function notifId(type, refId, createdTime) {
-      return `${type}:${refId}:${createdTime}`;
+    // Admins can switch to the organisation-wide audit feed: who did what to whom, across everyone.
+    if (req.query.scope === 'org') {
+      if (!can(user, 'logs.org')) return res.status(403).json({ success: false, error: 'Admin access required' });
+      const rows = await zcql.executeZCQLQuery(
+        `SELECT ROWID, action, user_email, details, created_time FROM ActivityLogs ORDER BY created_time DESC LIMIT 80`
+      ).catch(() => []);
+      return res.json({
+        success: true,
+        data: rows.map(r => r.ActivityLogs || r).map(l => ({
+          id: `audit:${l.ROWID}`, type: 'audit', action: l.action || 'Activity', details: l.details || '',
+          by_name: l.user_email || '', created_time: l.created_time,
+        })),
+      });
     }
 
-    const [shareRows, pwRows, teamMemberRows, allTeamRows, allUsers] = await Promise.all([
-      zcql.executeZCQLQuery(`SELECT * FROM PasswordShares ORDER BY ROWID DESC LIMIT 300`).catch(() => []),
-      zcql.executeZCQLQuery(`SELECT ROWID, name, expiry_date FROM Passwords WHERE owner_id = '${user.user_id}' AND expiry_date != ''`).catch(() => []),
-      zcql.executeZCQLQuery(`SELECT team_id, added_by FROM TeamMembers WHERE user_id = '${user.user_id}'`).catch(() => []),
-      zcql.executeZCQLQuery(`SELECT ROWID, name, created_time FROM Teams`).catch(() => []),
-      getAllUsersCached(catalystApp).catch(() => []),
+    const nowStr = now();
+    const iso = (ms) => new Date(Date.now() + ms).toISOString().slice(0, 19).replace('T', ' ');
+    const DAY = 86_400_000;
+
+    const teamRows = await zcql.executeZCQLQuery(`SELECT team_id FROM TeamMembers WHERE user_id = '${me}'`).catch(() => []);
+    const teamIds = teamRows.map(r => String((r.TeamMembers || r).team_id));
+    const teamIn = teamIds.length ? `, ${teamIds.map(id => `'${id}'`).join(',')}` : '';
+
+    const soft = (label) => (e) => { console.log('notifications query failed [' + label + ']:', e.message); return []; };
+    const [eventRows, pwRows, shareRows] = await Promise.all([
+      // my notifications (one row per recipient, so read state is mine alone)
+      zcql.executeZCQLQuery(
+        `SELECT ROWID, type, message, is_read, created_time FROM Notification WHERE user_id = '${me}' ORDER BY created_time DESC LIMIT 150`
+      ).catch(soft('events')),
+      // my passwords that expire within a week (or lapsed in the last month)
+      zcql.executeZCQLQuery(
+        `SELECT ROWID, name, expiry_date FROM Passwords WHERE owner_id = '${me}' AND expiry_date >= '${iso(-30 * DAY)}' AND expiry_date < '${iso(7 * DAY)}'`
+      ).catch(soft('passwords')),
+      // shares I received (directly or via a team) or created that run out within 3 days
+      zcql.executeZCQLQuery(
+        `SELECT ROWID, password_id, share_type, shared_with, expiry, created_by FROM PasswordShares WHERE expiry >= '${nowStr}' AND expiry < '${iso(3 * DAY)}' AND (shared_with IN ('${String(user.email_id).replace(/'/g, "''")}'${teamIn}) OR created_by = '${me}')`
+      ).catch(soft('shares')),
     ]);
-
-    const userMap = mapBy(allUsers, u => u.user_id);
-    const nameOf = (uid) => {
-      if (!uid) return 'Someone';
-      if (String(uid) === String(user.user_id)) return 'You';
-      const u = userMap[String(uid)];
-      return u ? (`${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email_id) : 'Someone';
-    };
-
-    const userTeamIds = teamMemberRows.map(r => String((r.TeamMembers || r).team_id));
-    const inviterMap = {};
-    teamMemberRows.forEach(r => {
-      const m = r.TeamMembers || r;
-      inviterMap[String(m.team_id)] = m.added_by;
-    });
-
-    const allTeams  = allTeamRows.map(r => r.Teams || r);
-    const allShares = shareRows.map(r => r.PasswordShares || r);
-    const passwords = pwRows.map(r => r.Passwords || r);
-
-    const myShares = allShares.filter(s => {
-      if (s.expiry && new Date(s.expiry.replace(' ', 'T') + 'Z') < now2) return false;
-      if (s.share_type === 'external' || s.share_type === 'external_folder') return false;
-      if (s.share_type === 'user'   && s.shared_with === user.email_id) return true;
-      if (s.share_type === 'folder' && s.shared_with === user.email_id) return true;
-      if (s.share_type === 'team'   && userTeamIds.includes(String(s.shared_with))) return true;
-      return false;
-    });
-
-    const pwIds     = [];
-    const folderIds = [];
-    myShares.forEach(s => {
-      if (s.share_type === 'folder') folderIds.push(s.password_id);
-      else                           pwIds.push(s.password_id);
-    });
-
-    const uniquePwIds     = [...new Set(pwIds)];
-    const uniqueFolderIds = [...new Set(folderIds)];
-
-    const [namePwRows, nameFolderRows] = await Promise.all([
-      uniquePwIds.length     ? zcql.executeZCQLQuery(`SELECT ROWID, name FROM Passwords WHERE ROWID IN (${uniquePwIds.join(',')})`).catch(() => [])   : Promise.resolve([]),
-      uniqueFolderIds.length ? zcql.executeZCQLQuery(`SELECT ROWID, name FROM Folders WHERE ROWID IN (${uniqueFolderIds.join(',')})`).catch(() => []) : Promise.resolve([]),
-    ]);
-
-    const pwNameMap = {};
-    namePwRows.forEach(r => { const p = r.Passwords || r; pwNameMap[String(p.ROWID)] = p.name; });
-    const folderNameMap = {};
-    nameFolderRows.forEach(r => { const f = r.Folders || r; folderNameMap[String(f.ROWID)] = f.name; });
-
-    const teamNameMap = {};
-    allTeams.forEach(t => { teamNameMap[String(t.ROWID)] = t.name; });
-
-    const myTeams = allTeams.filter(t => userTeamIds.includes(String(t.ROWID)));
 
     const notifications = [];
 
-    // ── Password / folder shares ────────────────────────────────────────────
-    myShares.forEach(s => {
-      const isFolder = s.share_type === 'folder';
-      const isTeam   = s.share_type === 'team';
-      const itemName = isFolder
-        ? (folderNameMap[String(s.password_id)] || 'a folder')
-        : (pwNameMap[String(s.password_id)]     || 'a password');
-      const teamName   = isTeam ? (teamNameMap[String(s.shared_with)] || 'a team') : null;
-      const sharerName = nameOf(s.created_by);
-
+    // ── Events: who did what, to whom ───────────────────────────────────────
+    eventRows.map(r => r.Notification || r).forEach(row => {
+      let ev = {};
+      try { ev = JSON.parse(row.message || '{}'); } catch (e) { ev = { details: row.message }; }
       notifications.push({
-        id:           notifId(isFolder ? 'folder_shared' : 'password_shared', s.password_id, s.created_time),
-        type:         isFolder ? 'folder_shared' : 'password_shared',
-        action:       isFolder ? 'Folder shared with you' : 'Password shared with you',
-        details:      isTeam
-          ? `"${itemName}" shared via team ${teamName}`
-          : `"${itemName}" was shared with you`,
-        by_name:      sharerName,
-        expiry:       s.expiry,
-        created_time: s.created_time,
-        ref_id:       s.password_id,
-      });
-    });
-
-    // ── Team membership (current state) ─────────────────────────────────────
-    myTeams.forEach(team => {
-      notifications.push({
-        id:           notifId('team_added', team.ROWID, team.created_time),
-        type:         'team_added',
-        action:       'Added to a team',
-        details:      `You are a member of "${team.name}"`,
-        by_name:      nameOf(inviterMap[String(team.ROWID)]),
-        created_time: team.created_time,
-        ref_id:       team.ROWID,
-      });
-    });
-
-    // ── Expiring passwords ───────────────────────────────────────────────────
-    passwords.forEach(pw => {
-      if (!pw.expiry_date) return;
-      const expiryDate = new Date(pw.expiry_date.replace(' ', 'T') + 'Z');
-      const diffDays   = Math.ceil((expiryDate - now2) / 86_400_000);
-      if (diffDays <= 7 && diffDays >= 0) {
-        notifications.push({
-          id:           notifId('password_expiring', pw.ROWID, pw.expiry_date),
-          type:         'password_expiring',
-          action:       diffDays === 0
-            ? 'Password expires today'
-            : `Password expiring in ${diffDays} day${diffDays > 1 ? 's' : ''}`,
-          details:      `"${pw.name}" will expire on ${expiryDate.toLocaleDateString()}`,
-          created_time: pw.expiry_date,
-          ref_id:       pw.ROWID,
-          urgent:       diffDays <= 1,
-        });
-      }
-    });
-
-    // ── Event-log notifications (member added/removed, access revoked, role/permission changes) ──
-    const eventRows = await zcql.executeZCQLQuery(
-      `SELECT * FROM NotificationEvents WHERE recipient_id = '${user.user_id}' ${userTeamIds.length ? `OR recipient_id IN (${userTeamIds.map(id => `'${id}'`).join(',')})` : ''} ORDER BY ROWID DESC LIMIT 100`
-    ).catch(() => []);
-
-    eventRows.map(r => r.NotificationEvents || r).forEach(ev => {
-      notifications.push({
-        id:           notifId(ev.event_type, ev.ref_id, ev.created_time),
-        type:         ev.event_type,
+        id:           `ev:${row.ROWID}`,
+        type:         row.type,
         action:       ev.title || ev.details || 'Activity update',
         details:      ev.details,
         by_name:      ev.actor_name,
-        created_time: ev.created_time,
+        actor_id:     ev.actor_id || '',
+        ref_name:     ev.ref_name || '',
+        scope:        ev.scope || 'you',
+        read:         row.is_read === true || row.is_read === 'true',
+        created_time: row.created_time,
         ref_id:       ev.ref_id,
       });
     });
 
+    // ── Expiring passwords ───────────────────────────────────────────────────
+    pwRows.map(r => r.Passwords || r).forEach(pw => {
+      if (!pw.expiry_date) return;
+      const expiryDate = new Date(String(pw.expiry_date).replace(' ', 'T') + 'Z');
+      const diffDays   = Math.ceil((expiryDate - Date.now()) / DAY);
+      const expired    = diffDays < 0;
+      notifications.push({
+        id:           `pwexp:${pw.ROWID}:${String(pw.expiry_date).slice(0, 10)}`,
+        type:         'password_expiring',
+        action:       expired ? 'Password expired' : diffDays === 0 ? 'Password expires today' : `Password expiring in ${diffDays} day${diffDays > 1 ? 's' : ''}`,
+        details:      `"${pw.name}" ${expired ? 'expired' : 'expires'} on ${expiryDate.toISOString().slice(0, 10)}`,
+        created_time: pw.expiry_date,
+        ref_id:       pw.ROWID,
+        urgent:       expired || diffDays <= 1,
+      });
+    });
+
+    // ── Shares about to expire ───────────────────────────────────────────────
+    const shares = shareRows.map(r => r.PasswordShares || r);
+    if (shares.length) {
+      const pwIds     = [...new Set(shares.filter(s => s.share_type !== 'folder').map(s => String(s.password_id)))];
+      const folderIds = [...new Set(shares.filter(s => s.share_type === 'folder').map(s => String(s.password_id)))];
+      const [pwNames, folderNames] = await Promise.all([
+        pwIds.length     ? zcql.executeZCQLQuery(`SELECT ROWID, name FROM Passwords WHERE ROWID IN (${pwIds.join(',')})`).catch(() => []) : [],
+        folderIds.length ? zcql.executeZCQLQuery(`SELECT ROWID, name FROM Folders WHERE ROWID IN (${folderIds.join(',')})`).catch(() => []) : [],
+      ]);
+      const nameMap = {};
+      pwNames.forEach(r => { const p = r.Passwords || r; nameMap['p' + p.ROWID] = p.name; });
+      folderNames.forEach(r => { const f = r.Folders || r; nameMap['f' + f.ROWID] = f.name; });
+      shares.forEach(s => {
+        const isFolder = s.share_type === 'folder';
+        const item = nameMap[(isFolder ? 'f' : 'p') + s.password_id] || (isFolder ? 'a folder' : 'a password');
+        const hours = Math.max(1, Math.round((new Date(String(s.expiry).replace(' ', 'T') + 'Z') - Date.now()) / 3_600_000));
+        const left = hours >= 24 ? `${Math.round(hours / 24)} day${Math.round(hours / 24) > 1 ? 's' : ''}` : `${hours} hour${hours > 1 ? 's' : ''}`;
+        const mine = String(s.created_by) === me;
+        notifications.push({
+          id:           `shexp:${s.ROWID}`,
+          type:         'share_expiring',
+          action:       mine ? 'A share you created is expiring' : 'Shared access is expiring',
+          details:      `Access to ${isFolder ? 'the folder ' : ''}"${item}" ends in ${left}`,
+          created_time: nowStr,
+          ref_id:       s.password_id,
+          urgent:       hours <= 24,
+        });
+      });
+    }
+
     notifications.sort((a, b) => {
-      const ta = a.created_time ? new Date(a.created_time.replace(' ', 'T') + 'Z') : 0;
-      const tb = b.created_time ? new Date(b.created_time.replace(' ', 'T') + 'Z') : 0;
+      const ta = a.created_time ? new Date(String(a.created_time).replace(' ', 'T') + 'Z') : 0;
+      const tb = b.created_time ? new Date(String(b.created_time).replace(' ', 'T') + 'Z') : 0;
       return tb - ta;
     });
 
@@ -866,12 +1026,47 @@ app.get('/api/notifications', async (req, res) => {
   }
 });
 
+// Rows I own: "ev:<ROWID>" ids from the feed, or every unread one with { all: true }.
+async function myNotificationRows(catalystApp, me, body, onlyUnread) {
+  const zcql = catalystApp.zcql();
+  if (body.all === true) {
+    return (await zcql.executeZCQLQuery(
+      `SELECT ROWID FROM Notification WHERE user_id = '${me}'${onlyUnread ? ' AND is_read = false' : ''} LIMIT 300`
+    ).catch(() => [])).map(r => String((r.Notification || r).ROWID));
+  }
+  const ids = [...new Set((Array.isArray(body.ids) ? body.ids : [])
+    .map(x => /^ev:(\d{1,20})$/.exec(String(x))).filter(Boolean).map(m => m[1]))].slice(0, 300);
+  if (!ids.length) return [];
+  // only rows that really belong to me
+  return (await zcql.executeZCQLQuery(
+    `SELECT ROWID FROM Notification WHERE user_id = '${me}' AND ROWID IN (${ids.join(',')})`
+  ).catch(() => [])).map(r => String((r.Notification || r).ROWID));
+}
+
 app.post('/api/notifications/mark-read', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
-    res.json({ success: true });
+
+    const rows = await myNotificationRows(catalystApp, String(user.user_id), req.body || {}, true);
+    if (rows.length) await catalystApp.datastore().table('Notification').updateRows(rows.map(ROWID => ({ ROWID, is_read: true })));
+    res.json({ success: true, updated: rows.length });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Dismiss = really delete my copy of the notification.
+app.delete('/api/notifications', async (req, res) => {
+  try {
+    const catalystApp = initApp(req);
+    const user = await getCurrentUser(req, catalystApp);
+    if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+    const rows = await myNotificationRows(catalystApp, String(user.user_id), req.body || {}, false);
+    if (rows.length) await catalystApp.datastore().table('Notification').deleteRows(rows);
+    res.json({ success: true, removed: rows.length });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -885,7 +1080,7 @@ app.post('/api/notifications/mark-read', async (req, res) => {
 const UTC_DT = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 app.get('/api/activity-logs', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -948,7 +1143,7 @@ app.get('/api/activity-logs', async (req, res) => {
 // POST /api/activity-logs/bulk-delete   body: { ids: ["...", "..."] }
 app.post('/api/activity-logs/bulk-delete', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -979,7 +1174,7 @@ app.post('/api/activity-logs/bulk-delete', async (req, res) => {
 // GET /api/activity-logs/analytics
 app.get('/api/activity-logs/analytics', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 

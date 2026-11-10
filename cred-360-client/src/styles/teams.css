@@ -437,3 +437,27 @@ body {
   color: var(--text-muted);
   margin-top: 2px;
 }
+/* ============================================================
+   Teams pages fit the viewport: compact header, body scrolls inside
+   (height comes from useFitHeight, so it adapts to any screen)
+   ============================================================ */
+.team-page { display: flex; flex-direction: column; min-height: 0; }
+
+.team-head {
+  flex: none; display: flex; align-items: flex-end; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px 20px; margin-bottom: 14px;
+}
+.team-head-info { min-width: 0; }
+.team-head-info .breadcrumb { margin-bottom: 2px; }
+.team-head-info .page-title { margin: 0; }
+.team-head-info .page-subtitle { margin: 2px 0 0; }
+.team-head-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.team-head-actions .pw-tabs { margin: 0; }
+.team-head-actions .search-box.team-search { width: 260px; max-width: 100%; margin: 0; flex: none; }
+
+.team-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 6px 4px 2px; margin: -4px -6px -4px -2px; }
+.team-page .team-chat.wa { height: 100%; }
+
+@media (max-width: 768px) {
+  .team-head-actions .search-box.team-search { width: 100%; }
+}

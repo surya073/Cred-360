@@ -8,6 +8,7 @@ import GlobalSearch from './GlobalSearch';
 import Tooltip from './Tooltip';
 import KeyShareLogo from './KeyShareLogo';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useNotifications } from '../context/NotificationContext';
 import {
   RiSunLine, RiMoonLine,
   RiUserLine, RiLogoutBoxLine,
@@ -47,6 +48,7 @@ const Navbar = ({ collapsed, onToggleSidebar }) => {
           setRecordCount, setFilterCount }      = useNavbar();
   const navigate                               = useNavigate();
   const location                               = useLocation();
+  const { unreadCount }                        = useNotifications();
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notifOpen,    setNotifOpen]    = useState(false);
@@ -191,7 +193,7 @@ const Navbar = ({ collapsed, onToggleSidebar }) => {
               aria-label="Notifications"
             >
               <RiNotification3Line size={17} />
-              <span className="notif-badge" />
+              {unreadCount > 0 && <span className="notif-count">{unreadCount > 9 ? '9+' : unreadCount}</span>}
             </button>
           </Tooltip>
           {notifOpen && <NotificationPanel onClose={() => setNotifOpen(false)} />}

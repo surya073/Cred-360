@@ -2,6 +2,16 @@
 
 const express    = require('express');
 const catalyst   = require('zcatalyst-sdk-node');
+// App handle for a request. `__admin` is the same app with the platform's own (admin) scope, created
+// only when used. System-written data (notifications, audit log) goes through it, because ordinary
+// roles (Team Lead, Employee...) have no insert permission on those tables.
+const initApp = (req) => {
+  const app = catalyst.initialize(req);
+  let admin;
+  Object.defineProperty(app, '__admin', { get: () => (admin = admin || catalyst.initialize(req, { scope: 'admin' })) });
+  return app;
+};
+
 const crypto     = require('crypto');
 const fs         = require('fs');
 const fileUpload = require('express-fileupload');
@@ -27,20 +37,32 @@ const safeEqual = (a, b) => {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
 
-// Tell a password's owner (when someone else acted) and every team it is shared with.
+// Tell everyone with a stake in a password about a change: its owner (when someone else acted),
+// every team it is shared with and every person it is shared with directly. Returns the user ids
+// to alert live.
 const notifyPasswordStakeholders = async (catalystApp, actor, pwRow, event_type, title, details) => {
   try {
-    const actorName = `${actor.first_name || ''} ${actor.last_name || ''}`.trim() || actor.email_id;
-    const base = { event_type, ref_id: pwRow.ROWID, ref_name: pwRow.name, actor_id: actor.user_id, actor_name: actorName, title, details };
-    if (pwRow.owner_id && String(pwRow.owner_id) !== String(actor.user_id)) {
-      pushNotification(catalystApp, { ...base, recipient_type: 'user', recipient_id: pwRow.owner_id }).catch(() => {});
-    }
-    const teamShares = await catalystApp.zcql().executeZCQLQuery(
-      `SELECT shared_with FROM PasswordShares WHERE password_id = '${pwRow.ROWID}' AND share_type = 'team'`
+    const base = { event_type, ref_id: pwRow.ROWID, ref_name: pwRow.name, actor_id: actor.user_id, actor_name: displayName(actor), title, details };
+    const recipients = [];
+    if (pwRow.owner_id && String(pwRow.owner_id) !== String(actor.user_id)) recipients.push({ type: 'user', id: pwRow.owner_id });
+
+    const shares = await catalystApp.zcql().executeZCQLQuery(
+      `SELECT shared_with, share_type FROM PasswordShares WHERE password_id = '${pwRow.ROWID}' AND share_type IN ('user','team')`
     ).catch(() => []);
-    [...new Set(teamShares.map(r => String((r.PasswordShares || r).shared_with)))].forEach(teamId =>
-      pushNotification(catalystApp, { ...base, recipient_type: 'team', recipient_id: teamId }).catch(() => {}));
-  } catch (e) { console.log('notifyPasswordStakeholders:', e.message); }
+    const users = shares.some(r => (r.PasswordShares || r).share_type === 'user') ? await getAllUsersCached(catalystApp).catch(() => []) : [];
+    const byEmail = {};
+    users.forEach(u => { byEmail[String(u.email_id || '').toLowerCase()] = u; });
+    const seen = new Set();
+    shares.forEach(r => {
+      const sh = r.PasswordShares || r;
+      if (sh.share_type === 'team') { if (!seen.has('t' + sh.shared_with)) { seen.add('t' + sh.shared_with); recipients.push({ type: 'team', id: sh.shared_with }); } }
+      else {
+        const u = byEmail[String(sh.shared_with || '').toLowerCase()];
+        if (u && !seen.has('u' + u.user_id)) { seen.add('u' + u.user_id); recipients.push({ type: 'user', id: u.user_id }); }
+      }
+    });
+    return await notify(catalystApp, base, recipients);
+  } catch (e) { console.log('notifyPasswordStakeholders:', e.message); return []; }
 };
 
 // getAllUsers() is a full directory fetch — memoise it per request so loops don't repeat it.
@@ -58,14 +80,15 @@ const notifyShareOwner = (catalystApp, share, event_type, title, details, refNam
     actor_name: share.shared_with || 'External user', title, details,
   }).catch(() => {});
 };
-const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain, upsertExternalUser, isExternalUserBlocked, pushNotification, getAllUsersCached, getProfileImageRowsCached, invalidateDirectory, selectAll } = require('shared-utils/helpers');
+const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain, upsertExternalUser, isExternalUserBlocked, pushNotification, notify, displayName, getAllUsersCached, getProfileImageRowsCached, invalidateDirectory, selectAll } = require('shared-utils/helpers');
+const { can, roleOf } = require('shared-utils/roles');
 const { permList, shareIsActive, getUserTeamIds, getDescendantFolderIds, userCanOnPassword, userCanOnFolder, validateExternalShare, checkRateLimit, recordFailedAttempt, clearAttempts } = require('shared-utils/permissions');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -84,7 +107,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 app.get('/api/userinfo', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -102,7 +125,7 @@ app.get('/api/userinfo', async (req, res) => {
 
 app.put('/api/profile/update', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -127,7 +150,7 @@ app.put('/api/profile/update', async (req, res) => {
 
 app.post('/api/profile/upload', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
     if (!req.files?.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
@@ -181,7 +204,7 @@ app.post('/api/profile/upload', async (req, res) => {
 
 app.get('/api/profile/image/:fileId', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const fileData    = await catalystApp.filestore().folder(PROFILE_FOLDER_ID).downloadFile(req.params.fileId);
     const buffer      = Buffer.isBuffer(fileData) ? fileData : Buffer.from(fileData.data || fileData);
 
@@ -200,7 +223,7 @@ app.get('/api/profile/image/:fileId', async (req, res) => {
 
 app.get('/api/profile/info', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -223,7 +246,7 @@ app.get('/api/profile/info', async (req, res) => {
 
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -392,7 +415,7 @@ app.get('/api/dashboard', async (req, res) => {
 
 app.get('/api/categories', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -429,7 +452,7 @@ app.get('/api/categories', async (req, res) => {
 
 app.post('/api/categories', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -463,7 +486,7 @@ app.post('/api/categories', async (req, res) => {
 
 app.put('/api/categories/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -484,7 +507,7 @@ app.put('/api/categories/:id', async (req, res) => {
 
 app.delete('/api/categories/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -517,7 +540,7 @@ app.delete('/api/categories/:id', async (req, res) => {
 
 app.get('/api/passwords', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -533,7 +556,7 @@ app.get('/api/passwords', async (req, res) => {
 
 app.post('/api/passwords', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -564,7 +587,7 @@ app.post('/api/passwords', async (req, res) => {
 
 app.put('/api/passwords/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -595,9 +618,9 @@ app.put('/api/passwords/:id', async (req, res) => {
       action: 'Password updated', user_id: user.user_id, user_email: user.email_id,
       password_id: req.params.id, details: `Updated password: ${req.body.name}`,
     });
-    notifyPasswordStakeholders(catalystApp, user, pwRow, 'password_updated', 'Password updated', `"${req.body.name}" was updated`);
+    const notify_to = await notifyPasswordStakeholders(catalystApp, user, pwRow, 'password_updated', 'Password updated', `${displayName(user)} updated "${req.body.name}"`);
 
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -605,7 +628,7 @@ app.put('/api/passwords/:id', async (req, res) => {
 
 app.delete('/api/passwords/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -619,7 +642,7 @@ app.delete('/api/passwords/:id', async (req, res) => {
       return res.status(403).json({ success: false, error: 'You do not have delete access to this password' });
     }
 
-    await notifyPasswordStakeholders(catalystApp, user, pwRow, 'password_deleted', 'Password deleted', `"${pwRow.name}" was deleted`);
+    const notify_to = await notifyPasswordStakeholders(catalystApp, user, pwRow, 'password_deleted', 'Password deleted', `${displayName(user)} deleted "${pwRow.name}"`);
     await catalystApp.datastore().table('Passwords').deleteRow(req.params.id);
 
     logActivity(catalystApp, {
@@ -627,7 +650,7 @@ app.delete('/api/passwords/:id', async (req, res) => {
       password_id: req.params.id, details: `Deleted password: ${pwRow.name}`,
     });
 
-    res.json({ success: true });
+    res.json({ success: true, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -635,7 +658,7 @@ app.delete('/api/passwords/:id', async (req, res) => {
 
 app.put('/api/passwords/:id/toggle-active', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -672,7 +695,7 @@ app.put('/api/passwords/:id/toggle-active', async (req, res) => {
 
 app.get('/api/passwords/expiring', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -703,7 +726,7 @@ app.get('/api/passwords/expiring', async (req, res) => {
 
 app.get('/api/folders-with-passwords', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -730,7 +753,7 @@ app.get('/api/folders-with-passwords', async (req, res) => {
 
 app.post('/api/folders', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -754,7 +777,7 @@ app.post('/api/folders', async (req, res) => {
 
 app.put('/api/folders/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -818,7 +841,7 @@ app.put('/api/folders/:id', async (req, res) => {
 
 app.delete('/api/folders/:id', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -904,7 +927,7 @@ app.delete('/api/folders/:id', async (req, res) => {
 
 app.put('/api/folders/:id/toggle-active', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -939,43 +962,100 @@ app.put('/api/folders/:id/toggle-active', async (req, res) => {
 
 // ── SHARES ────────────────────────────────────────────────────────────────────
 
+// ── SHARING (internal: people and teams) ─────────────────────────────────────
+const SHARE_PERMS = ['view', 'edit', 'delete'];
+const PERM_LABEL  = { view: 'View', edit: 'Edit', delete: 'Delete' };
+const normPerms = (raw) => {
+  const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
+  const set = new Set(list.map(x => String(x).trim().toLowerCase()).filter(x => SHARE_PERMS.includes(x)));
+  set.add('view'); // sharing something with no access makes no sense
+  return SHARE_PERMS.filter(x => set.has(x));
+};
+const permText = (perms) => perms.map(x => PERM_LABEL[x]).join(', ');
+const expiryText = (expiry) => (expiry ? ` · expires ${String(expiry).slice(0, 10)}` : '');
+
+// Resolve who a share is going to: a person (by e-mail) or a team (by id).
+async function resolveShareTarget(catalystApp, kind, sharedWith) {
+  if (kind === 'team') {
+    if (!/^\d{1,20}$/.test(String(sharedWith))) return null;
+    const rows = await catalystApp.zcql().executeZCQLQuery(`SELECT ROWID, name FROM Teams WHERE ROWID = ${sharedWith}`).catch(() => []);
+    const t = rows[0] ? (rows[0].Teams || rows[0]) : null;
+    return t ? { type: 'team', id: String(t.ROWID), label: t.name, stored: String(t.ROWID) } : null;
+  }
+  const email = String(sharedWith || '').trim().toLowerCase();
+  if (!email) return null;
+  const users = await getAllUsersCached(catalystApp).catch(() => []);
+  const u = users.find(x => String(x.email_id || '').toLowerCase() === email);
+  return u ? { type: 'user', id: String(u.user_id), label: displayName(u), stored: u.email_id } : null;
+}
+
+const isTeamMemberOf = async (catalystApp, userId, teamId) => (await catalystApp.zcql().executeZCQLQuery(
+  `SELECT ROWID FROM TeamMembers WHERE team_id = '${teamId}' AND user_id = '${userId}' LIMIT 1`).catch(() => [])).length > 0;
+
+// Create the share, or update it if the same recipient already has one (so re-sharing edits
+// permissions/expiry instead of piling up duplicates).
+async function upsertShare(catalystApp, user, { itemId, shareType, target, perms, expiry, description }) {
+  const table = catalystApp.datastore().table('PasswordShares');
+  const existing = await catalystApp.zcql().executeZCQLQuery(
+    `SELECT ROWID FROM PasswordShares WHERE password_id = '${itemId}' AND share_type = '${shareType}' AND shared_with = '${String(target.stored).replace(/'/g, "''")}' LIMIT 1`
+  ).catch(() => []);
+  const fields = { permissions: perms.join(','), expiry: expiry || null, description: description || '' };
+  if (existing.length) {
+    const row = await table.updateRow({ ROWID: String((existing[0].PasswordShares || existing[0]).ROWID), ...fields });
+    return { row, updated: true };
+  }
+  const row = await table.insertRow({
+    password_id: String(itemId), shared_with: target.stored, share_type: shareType,
+    token: '', passphrase: '', is_viewed: false, created_by: user.user_id, created_time: now(), ...fields,
+  });
+  return { row, updated: false };
+}
+
 app.post('/api/shares', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'passwords.share')) return res.status(403).json({ success: false, error: 'Your role cannot share passwords' });
 
-    const row = await catalystApp.datastore().table('PasswordShares').insertRow({
-      password_id:  String(req.body.password_id),
-      shared_with:  req.body.shared_with,
-      share_type:   req.body.share_type,
-      expiry:       req.body.expiry || null,
-      token:        '',
-      passphrase:   '',
-      description:  req.body.description || '',
-      is_viewed:    false,
-      created_by:   user.user_id,
-      created_time: now(),
-      permissions: Array.isArray(req.body.permissions) ? req.body.permissions.join(',') : (req.body.permissions || ''),
-    });
+    const kind = req.body.share_type;
+    const passwordId = String(req.body.password_id || '');
+    if (!['user', 'team'].includes(kind)) return res.status(400).json({ success: false, error: 'Choose a person or a team to share with' });
+    if (!/^\d{1,20}$/.test(passwordId)) return res.status(400).json({ success: false, error: 'Invalid password' });
 
-    const zcql = catalystApp.zcql();
-    const [pwRows, teamRows] = await Promise.all([
-      zcql.executeZCQLQuery(`SELECT name FROM Passwords WHERE ROWID = ${req.body.password_id}`).catch(() => []),
-      req.body.share_type === 'team'
-        ? zcql.executeZCQLQuery(`SELECT name FROM Teams WHERE ROWID = ${req.body.shared_with}`).catch(() => [])
-        : Promise.resolve([]),
-    ]);
-    const passwordName   = pwRows.length   > 0 ? (pwRows[0].Passwords   || pwRows[0]).name   : req.body.password_id;
-    const sharedWithName = teamRows.length > 0 ? (teamRows[0].Teams      || teamRows[0]).name : req.body.shared_with;
+    const pwRows = await catalystApp.zcql().executeZCQLQuery(`SELECT ROWID, name, owner_id FROM Passwords WHERE ROWID = ${passwordId}`).catch(() => []);
+    const pw = pwRows[0] ? (pwRows[0].Passwords || pwRows[0]) : null;
+    if (!pw) return res.status(404).json({ success: false, error: 'Password not found' });
+    const admin = roleOf(user) === 'Admin';
+    if (String(pw.owner_id) !== String(user.user_id) && !admin) {
+      return res.status(403).json({ success: false, error: 'Only the owner of a password can share it' });
+    }
+
+    const target = await resolveShareTarget(catalystApp, kind, req.body.shared_with);
+    if (!target) return res.status(404).json({ success: false, error: kind === 'team' ? 'Team not found' : 'That person is not in this workspace' });
+    if (target.type === 'user' && target.id === String(user.user_id)) return res.status(400).json({ success: false, error: 'You already have access to your own password' });
+    if (target.type === 'team' && !admin && !(await isTeamMemberOf(catalystApp, user.user_id, target.id))) {
+      return res.status(403).json({ success: false, error: 'You can only share with teams you belong to' });
+    }
+
+    const perms = normPerms(req.body.permissions);
+    const { row, updated } = await upsertShare(catalystApp, user, { itemId: passwordId, shareType: kind, target, perms, expiry: req.body.expiry, description: req.body.description });
+
+    const actor = displayName(user);
+    const notify_to = await notify(catalystApp, {
+      event_type: 'password_shared', ref_id: passwordId, ref_name: pw.name, actor_id: user.user_id, actor_name: actor,
+      title: target.type === 'team' ? `Password shared with ${target.label}` : (updated ? 'Password access updated' : 'Password shared with you'),
+      details: target.type === 'team'
+        ? updated ? `${actor} updated the team "${target.label}"'s access to "${pw.name}" (${permText(perms)})${expiryText(req.body.expiry)}` : `${actor} shared "${pw.name}" with the team "${target.label}" (${permText(perms)})${expiryText(req.body.expiry)}`
+        : updated ? `${actor} updated your access to "${pw.name}" (${permText(perms)})${expiryText(req.body.expiry)}` : `${actor} shared "${pw.name}" with you (${permText(perms)})${expiryText(req.body.expiry)}`,
+    }, [{ type: target.type, id: target.id }]);
 
     logActivity(catalystApp, {
-      action: 'Password shared', user_id: user.user_id, user_email: user.email_id,
-      password_id: String(req.body.password_id),
-      details: `"${passwordName}" shared with ${sharedWithName}`,
+      action: updated ? 'Share updated' : 'Password shared', user_id: user.user_id, user_email: user.email_id,
+      password_id: passwordId, details: `"${pw.name}" ${updated ? 'access updated for' : 'shared with'} ${target.label} (${permText(perms)})`,
     });
 
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, updated, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -983,7 +1063,7 @@ app.post('/api/shares', async (req, res) => {
 
 app.get('/api/shares/my', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -1067,7 +1147,7 @@ app.get('/api/shares/my', async (req, res) => {
 // no access, so this is housekeeping; one audit entry records how many were removed.
 app.delete('/api/shares/expired/mine', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -1098,7 +1178,7 @@ app.delete('/api/shares/expired/mine', async (req, res) => {
 
 app.delete('/api/shares/:id/revoke', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -1141,18 +1221,15 @@ app.delete('/api/shares/:id/revoke', async (req, res) => {
       recipientId = match ? match.user_id : shareDetails.shared_with;
     }
 
-    await pushNotification(catalystApp, {
+    const actorName = displayName(user);
+    const notify_to = await notify(catalystApp, {
       event_type: isFolderShare ? 'folder_access_revoked' : 'password_access_revoked',
-      recipient_type: isTeam ? 'team' : 'user',
-      recipient_id: recipientId,
-      ref_id: shareDetails.password_id, ref_name: itemName,
-      actor_id: user.user_id,
-      actor_name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email_id,
+      ref_id: shareDetails.password_id, ref_name: itemName, actor_id: user.user_id, actor_name: actorName,
       title: isFolderShare ? 'Folder access revoked' : 'Password access revoked',
-      details: `Your access to "${itemName}" was revoked`,
-    });
+      details: `${actorName} revoked ${isTeam ? 'your team\'s' : 'your'} access to ${isFolderShare ? 'the folder ' : ''}"${itemName}"`,
+    }, [{ type: isTeam ? 'team' : 'user', id: recipientId }]);
 
-    res.json({ success: true });
+    res.json({ success: true, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1160,7 +1237,7 @@ app.delete('/api/shares/:id/revoke', async (req, res) => {
 
 app.get('/api/shares/folders/received', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -1288,40 +1365,49 @@ app.get('/api/shares/folders/received', async (req, res) => {
 
 app.post('/api/shares/folder', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'folders.share')) return res.status(403).json({ success: false, error: 'Your role cannot share folders' });
 
-    const row = await catalystApp.datastore().table('PasswordShares').insertRow({
-      password_id:  String(req.body.folder_id),
-      shared_with:  req.body.shared_with,
-      share_type:   'folder',
-      expiry:       req.body.expiry,
-      token:        '', passphrase:  '',
-      description:  req.body.description || '',
-      is_viewed:    false,
-      created_by:   user.user_id,
-      created_time: now(),
-      permissions: Array.isArray(req.body.permissions) ? req.body.permissions.join(',') : (req.body.permissions || ''),
-    });
+    const folderId = String(req.body.folder_id || '');
+    if (!/^\d{1,20}$/.test(folderId)) return res.status(400).json({ success: false, error: 'Invalid folder' });
 
-    const zcql = catalystApp.zcql();
-    const [folderRows, teamRows] = await Promise.all([
-      zcql.executeZCQLQuery(`SELECT name FROM Folders WHERE ROWID = ${req.body.folder_id}`).catch(() => []),
-      req.body.share_type === 'team'
-        ? zcql.executeZCQLQuery(`SELECT name FROM Teams WHERE ROWID = ${req.body.shared_with}`).catch(() => [])
-        : Promise.resolve([]),
-    ]);
-    const folderName    = folderRows.length > 0 ? (folderRows[0].Folders || folderRows[0]).name : req.body.folder_id;
-    const sharedWithName = teamRows.length  > 0 ? (teamRows[0].Teams    || teamRows[0]).name  : req.body.shared_with;
+    const fRows = await catalystApp.zcql().executeZCQLQuery(`SELECT ROWID, name, owner_id FROM Folders WHERE ROWID = ${folderId}`).catch(() => []);
+    const folder = fRows[0] ? (fRows[0].Folders || fRows[0]) : null;
+    if (!folder) return res.status(404).json({ success: false, error: 'Folder not found' });
+    const admin = roleOf(user) === 'Admin';
+    if (String(folder.owner_id) !== String(user.user_id) && !admin) {
+      return res.status(403).json({ success: false, error: 'Only the owner of a folder can share it' });
+    }
+
+    // A folder share stores the recipient as an e-mail (person) or a team id.
+    const kind = req.body.share_type === 'team' || !String(req.body.shared_with || '').includes('@') ? 'team' : 'user';
+    const target = await resolveShareTarget(catalystApp, kind, req.body.shared_with);
+    if (!target) return res.status(404).json({ success: false, error: kind === 'team' ? 'Team not found' : 'That person is not in this workspace' });
+    if (target.type === 'user' && target.id === String(user.user_id)) return res.status(400).json({ success: false, error: 'You already have access to your own folder' });
+    if (target.type === 'team' && !admin && !(await isTeamMemberOf(catalystApp, user.user_id, target.id))) {
+      return res.status(403).json({ success: false, error: 'You can only share with teams you belong to' });
+    }
+
+    const perms = normPerms(req.body.permissions);
+    const { row, updated } = await upsertShare(catalystApp, user, { itemId: folderId, shareType: 'folder', target, perms, expiry: req.body.expiry, description: req.body.description });
+
+    const actor = displayName(user);
+    const notify_to = await notify(catalystApp, {
+      event_type: 'folder_shared', ref_id: folderId, ref_name: folder.name, actor_id: user.user_id, actor_name: actor,
+      title: target.type === 'team' ? `Folder shared with ${target.label}` : (updated ? 'Folder access updated' : 'Folder shared with you'),
+      details: target.type === 'team'
+        ? updated ? `${actor} updated the team "${target.label}"'s access to the folder "${folder.name}" (${permText(perms)})${expiryText(req.body.expiry)}` : `${actor} shared the folder "${folder.name}" with the team "${target.label}" (${permText(perms)})${expiryText(req.body.expiry)}`
+        : updated ? `${actor} updated your access to the folder "${folder.name}" (${permText(perms)})${expiryText(req.body.expiry)}` : `${actor} shared the folder "${folder.name}" with you (${permText(perms)})${expiryText(req.body.expiry)}`,
+    }, [{ type: target.type, id: target.id }]);
 
     logActivity(catalystApp, {
-      action: 'Folder shared', user_id: user.user_id, user_email: user.email_id,
-      password_id: String(req.body.folder_id),
-      details: `Folder "${folderName}" shared with ${sharedWithName}`,
+      action: updated ? 'Share updated' : 'Folder shared', user_id: user.user_id, user_email: user.email_id,
+      password_id: folderId, details: `Folder "${folder.name}" ${updated ? 'access updated for' : 'shared with'} ${target.label} (${permText(perms)})`,
     });
 
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, updated, notify_to });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1336,9 +1422,10 @@ function makePassphrase() {
 
 app.post('/api/shares/external', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'passwords.share_external')) return res.status(403).json({ success: false, error: 'Your role cannot share outside the workspace' });
 
     if (await isExternalUserBlocked(catalystApp, req.body.client_email)) {
       return res.status(403).json({ success: false, error: 'This recipient is blocked from receiving external shares' });
@@ -1396,9 +1483,10 @@ app.post('/api/shares/external', async (req, res) => {
 
 app.post('/api/shares/external/folder', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!can(user, 'passwords.share_external')) return res.status(403).json({ success: false, error: 'Your role cannot share outside the workspace' });
 
     if (await isExternalUserBlocked(catalystApp, req.body.client_email)) {
       return res.status(403).json({ success: false, error: 'This recipient is blocked from receiving external shares' });
@@ -1451,7 +1539,7 @@ app.post('/api/shares/external/folder', async (req, res) => {
 
 app.put('/api/external/password/:token', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const { passphrase, password_id, name, username, password, url, notes, category } = req.body;
 
     const { share, error, status } = await validateExternalShare(catalystApp, req.params.token, passphrase);
@@ -1497,7 +1585,7 @@ app.put('/api/external/password/:token', async (req, res) => {
 
 app.post('/api/external/password/:token/delete', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const { passphrase, password_id } = req.body;
 
     const { share, error, status } = await validateExternalShare(catalystApp, req.params.token, passphrase);
@@ -1541,7 +1629,7 @@ app.post('/api/external/password/:token/delete', async (req, res) => {
 
 app.get('/api/shares/received', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -1609,7 +1697,7 @@ app.get('/api/shares/received', async (req, res) => {
 app.get('/api/shares/validate/:token', async (req, res) => {
   try {
     if (!TOKEN_RE.test(req.params.token || '')) return res.status(404).json({ success: false, error: 'Invalid or expired link' });
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const rows = await catalystApp.zcql().executeZCQLQuery(
       `SELECT * FROM PasswordShares WHERE token = '${req.params.token}'`
     );
@@ -1630,7 +1718,7 @@ app.get('/api/shares/validate/:token', async (req, res) => {
 
 app.post('/api/shares/verify-passphrase', async (req, res) => {
   try {
-    const catalystApp = catalyst.initialize(req);
+    const catalystApp = initApp(req);
     const zcql        = catalystApp.zcql();
     const { token, passphrase } = req.body;
 
@@ -1724,7 +1812,7 @@ app.post('/api/shares/verify-passphrase', async (req, res) => {
 
 // app.get('/api/shares/unread-counts', async (req, res) => {
 //   try {
-//     const catalystApp = catalyst.initialize(req);
+//     const catalystApp = initApp(req);
 //     const user = await getCurrentUser(req, catalystApp);
 //     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -1756,7 +1844,7 @@ app.post('/api/shares/verify-passphrase', async (req, res) => {
 
 // app.post('/api/shares/mark-viewed', async (req, res) => {
 //   try {
-//     const catalystApp = catalyst.initialize(req);
+//     const catalystApp = initApp(req);
 //     const user = await getCurrentUser(req, catalystApp);
 //     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 

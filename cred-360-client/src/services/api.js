@@ -8,6 +8,7 @@
 // Usage is identical to axios:  api.get(url, config), api.post(url, body) ...
 // Pass `{ fresh: true }` in the GET config to force a network call (e.g. refresh buttons).
 import axios from 'axios';
+import { pingNotify } from './realtime';
 
 const DEFAULT_TTL = 30 * 1000;
 
@@ -103,6 +104,8 @@ const KEEP_CACHE = [/\/teams\/[^/]+\/messages(\/|$)/, /\/api\/ping$/];
 const write = (method) => (...args) =>
   axios[method](...args).then((res) => {
     if (!KEEP_CACHE.some((re) => re.test(String(args[0])))) clearApiCache();
+    // Actions that notify other people return their user ids; relay a content-free live ping.
+    if (Array.isArray(res.data?.notify_to) && res.data.notify_to.length) pingNotify(res.data.notify_to);
     return res;
   });
 

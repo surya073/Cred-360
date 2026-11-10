@@ -1,167 +1,41 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from '../services/api';
 import {
-  RiBellLine, RiKeyLine, RiShareLine,
-  RiUserAddLine, RiDeleteBinLine, RiEditLine,
-  RiTimeLine, RiCloseLine, RiCheckDoubleLine,
-  RiRefreshLine, RiFolderLine, RiTeamLine,
-  RiShieldUserLine, RiHistoryLine, RiUserFollowLine,
-  RiUserUnfollowLine, RiShieldCheckLine, RiLockUnlockLine,
-  RiFolderSharedLine, RiFolderForbidLine, RiEditBoxLine,
-  RiDeleteBin6Line, RiNotificationOffLine, RiCheckLine,
-  RiErrorWarningLine, RiInformationLine, RiAlertLine,
-  RiEyeLine, RiLockLine, RiPlayCircleLine
+  RiCloseLine, RiCheckDoubleLine, RiRefreshLine, RiDeleteBinLine, RiCheckLine,
+  RiTimeLine, RiTeamLine, RiAlertLine, RiBuilding2Line, RiUser3Line,
 } from 'react-icons/ri';
+import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../context/NotificationContext';
 import { formatRelative, dateKey, todayKey } from '../utils/dateHelper';
-import { useNavigate } from 'react-router-dom';
+import {
+  CATEGORIES, getMeta, getPriority, getTargetRoute, initialsOf, avatarColor,
+} from '../utils/notificationMeta';
 
-// const API = '/server/cred_360_function';
 const API = '/server/cred_360_people_function';
-const NOTIF_READ_IDS_KEY  = 'cred360_notif_read_ids';
-const NOTIF_DISMISSED_KEY = 'cred360_notif_dismissed_ids';
-const PAGE_SIZE           = 10;
+const PAGE_SIZE = 12;
+const GROUP_ORDER = ['Today', 'Yesterday', 'This week', 'Earlier'];
 
-// ── Type → visual metadata ──────────────────────────────────────────────────
-// Extensible map: covers today's backend types plus the fuller enterprise
-// vocabulary (team/user/folder/password lifecycle events) so the panel keeps
-// working unchanged if/when the API starts emitting more event types.
-const TYPE_META = {
-  // Password Management
-  password_shared:        { icon: RiShareLine,        label: 'Password Shared',      module: 'Password Management', priority: 'info' },
-  password_expiring:      { icon: RiTimeLine,          label: 'Password Expiring',    module: 'Password Management', priority: 'warning' },
-  password_created:       { icon: RiKeyLine,           label: 'Password Added',       module: 'Password Management', priority: 'success' },
-  password_updated:       { icon: RiEditBoxLine,       label: 'Password Updated',     module: 'Password Management', priority: 'info' },
-  password_deleted:       { icon: RiDeleteBin6Line,    label: 'Password Deleted',     module: 'Password Management', priority: 'error' },
-  password_access_revoked:{ icon: RiFolderForbidLine,  label: 'Access Revoked',       module: 'Password Management', priority: 'error' },
-
-  // Folder Management
-  folder_shared:          { icon: RiFolderSharedLine,  label: 'Folder Shared',        module: 'Folder Management',   priority: 'info' },
-  folder_renamed:         { icon: RiEditBoxLine,       label: 'Folder Renamed',       module: 'Folder Management',   priority: 'info' },
-  folder_deleted:         { icon: RiDeleteBin6Line,    label: 'Folder Deleted',       module: 'Folder Management',   priority: 'error' },
-  folder_access_revoked:  { icon: RiFolderForbidLine,  label: 'Folder Access Revoked',module: 'Folder Management',   priority: 'error' },
-
-  // Team Management
-  team_added:             { icon: RiTeamLine,          label: 'Added to Team',        module: 'Team Management',     priority: 'success' },
-  member_added:           { icon: RiUserFollowLine,    label: 'Member Added',         module: 'Team Management',     priority: 'success' },
-  member_removed:         { icon: RiUserUnfollowLine,  label: 'Member Removed',       module: 'Team Management',     priority: 'error' },
-  team_updated:           { icon: RiEditBoxLine,       label: 'Team Updated',         module: 'Team Management',     priority: 'info' },
-  team_deleted:           { icon: RiDeleteBin6Line,    label: 'Team Deleted',         module: 'Team Management',     priority: 'error' },
-  team_status_changed:    { icon: RiPlayCircleLine,    label: 'Team Status',          module: 'Team Management',     priority: 'warning' },
-
-  // External sharing
-  external_share_viewed:  { icon: RiEyeLine,           label: 'External Share Opened',module: 'Sharing',             priority: 'success' },
-  external_share_locked:  { icon: RiLockLine,          label: 'Link Locked',          module: 'Sharing',             priority: 'error' },
-
-  // User Management
-  role_changed:           { icon: RiShieldUserLine,    label: 'Role Changed',         module: 'User Management',     priority: 'warning' },
-  permissions_updated:    { icon: RiShieldCheckLine,   label: 'Permissions Updated',  module: 'User Management',     priority: 'warning' },
-};
-
-const DEFAULT_META = { icon: RiBellLine, label: 'Activity', module: 'Activity', priority: 'info' };
-
-const getMeta = (log) => TYPE_META[log.type] || DEFAULT_META;
-
-const getPriority = (log) => {
-  if (log.type === 'password_expiring') return log.urgent ? 'error' : 'warning';
-  return getMeta(log).priority;
-};
-
-const PRIORITY_LABEL = { info: 'Info', success: 'Success', warning: 'Warning', error: 'Error' };
-
-const getTargetRoute = (log) => {
-  switch (log.type) {
-    case 'password_shared':
-    case 'password_expiring':
-    case 'password_created':
-    case 'password_updated':
-    case 'password_deleted':
-    case 'password_access_revoked':
-      return log.ref_id ? `/passwords?highlight=${log.ref_id}` : '/passwords';
-    case 'folder_shared':
-    case 'folder_renamed':
-    case 'folder_deleted':
-    case 'folder_access_revoked':
-      return log.ref_id ? `/folders?highlight=${log.ref_id}` : '/folders';
-    case 'team_added':
-    case 'member_added':
-    case 'member_removed':
-      return log.ref_id ? `/teams?highlight=${log.ref_id}` : '/teams';
-    case 'team_updated':
-    case 'team_deleted':
-    case 'team_status_changed':
-      return log.type === 'team_deleted' ? '/teams' : (log.ref_id ? `/teams?highlight=${log.ref_id}` : '/teams');
-    case 'external_share_viewed':
-    case 'external_share_locked':
-      return '/shares';
-    case 'role_changed':
-    case 'permissions_updated':
-      return log.ref_id ? `/users?highlight=${log.ref_id}` : '/users';
-    default:
-      return null;
-  }
-};
-
-const timeAgo = (dateStr) => formatRelative(dateStr, '');
-
-const cleanDetails = (details) => {
-  if (!details) return null;
-  return details.replace(/\d{17}/g, 'a team');
-};
-
-// "Shared by X" / "Added by X" line — returns null if no name available
-const byLine = (log) => {
-  if (!log.by_name) return null;
-  if (log.type === 'team_added' || log.type === 'member_added') return `Added by ${log.by_name}`;
-  if (log.type === 'member_removed') return `Removed by ${log.by_name}`;
-  if (log.type === 'password_shared' || log.type === 'folder_shared') return `Shared by ${log.by_name}`;
-  if (log.type === 'role_changed' || log.type === 'permissions_updated') return `Changed by ${log.by_name}`;
-  return `By ${log.by_name}`;
-};
-
-// Group label bucketing — Today / Yesterday / This Week / Earlier
 const getGroupLabel = (dateStr, now) => {
-  if (!dateStr) return 'Earlier';
-  const k = dateKey(dateStr);
+  const k = dateStr ? dateKey(dateStr) : null;
   if (!k) return 'Earlier';
   if (k === todayKey()) return 'Today';
   if (k === dateKey(new Date(now.getTime() - 86400000))) return 'Yesterday';
-  if (k >= dateKey(new Date(now.getTime() - 7 * 86400000))) return 'This Week';
+  if (k >= dateKey(new Date(now.getTime() - 7 * 86400000))) return 'This week';
   return 'Earlier';
 };
 
-const GROUP_ORDER = ['Today', 'Yesterday', 'This Week', 'Earlier'];
-
-const persistIds = (key, idSet) => {
-  const arr = [...idSet].slice(-500); // cap stored IDs to avoid unbounded growth
-  try { localStorage.setItem(key, JSON.stringify(arr)); } catch { /* storage full/unavailable — ignore */ }
-};
-
-const loadIds = (key) => {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
-  } catch {
-    return new Set();
-  }
-};
-
-// ── Small presentational pieces ─────────────────────────────────────────────
-
-const PriorityDot = ({ priority }) => (
-  <span className={`notif-priority-dot notif-priority-${priority}`} title={PRIORITY_LABEL[priority]} />
-);
-
-const EmptyState = () => (
+const EmptyState = ({ title, sub }) => (
   <div className="notif-empty">
-    <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
       <circle cx="36" cy="36" r="34" fill="var(--bg-secondary)" />
-      <path d="M36 20c-7.2 0-13 5.8-13 13v8l-4 6h34l-4-6v-8c0-7.2-5.8-13-13-13z"
-            stroke="var(--text-muted)" strokeWidth="2" strokeLinejoin="round" fill="none" />
+      <path d="M36 20c-7.2 0-13 5.8-13 13v8l-4 6h34l-4-6v-8c0-7.2-5.8-13-13-13z" stroke="var(--text-muted)" strokeWidth="2" strokeLinejoin="round" fill="none" />
       <path d="M31 51a5 5 0 0 0 10 0" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" />
       <circle cx="52" cy="22" r="8" fill="var(--success-bg)" />
       <path d="M48.5 22l2.3 2.3 4.7-4.7" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
-    <p className="notif-empty-title">No notifications yet</p>
-    <p className="notif-empty-sub">You're all caught up — new activity will show up here.</p>
+    <p className="notif-empty-title">{title}</p>
+    <p className="notif-empty-sub">{sub}</p>
   </div>
 );
 
@@ -181,300 +55,210 @@ const SkeletonList = () => (
 );
 
 const NotificationPanel = ({ onClose }) => {
-  const [logs, setLogs]         = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [readIds, setReadIds]           = useState(() => loadIds(NOTIF_READ_IDS_KEY));
-  const [dismissedIds, setDismissedIds] = useState(() => loadIds(NOTIF_DISMISSED_KEY));
+  const { user } = useAuth();
+  const isAdmin = /admin/i.test(user?.role_details?.role_name || '');
+  const {
+    items, loading, refreshing, isRead, unreadCount, refresh, markRead, markAllRead, dismiss, dismissAll,
+  } = useNotifications();
+
+  const [scope, setScope]     = useState('mine');      // mine | org (admins)
+  const [cat, setCat]         = useState('all');
+  const [onlyUnread, setOnlyUnread] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [filter, setFilter] = useState('all'); // all | unread
+  const [org, setOrg]         = useState({ items: [], loading: false, loaded: false });
 
   const panelRef = useRef(null);
-  const bodyRef  = useRef(null);
   const navigate = useNavigate();
 
-  // Sorted, newest-first, with dismissed entries removed.
-  const sortedLogs = useMemo(() => {
-    return [...logs]
-      .filter(log => !log.id || !dismissedIds.has(log.id))
-      .sort((a, b) => {
-        const ta = a.created_time ? new Date(a.created_time.replace(' ', 'T') + 'Z') : 0;
-        const tb = b.created_time ? new Date(b.created_time.replace(' ', 'T') + 'Z') : 0;
-        return tb - ta;
-      });
-  }, [logs, dismissedIds]);
+  // Make sure the feed is reasonably fresh whenever the panel opens (the socket keeps it live otherwise).
+  useEffect(() => { refresh(); }, [refresh]);
 
-  const filteredLogs = useMemo(() => {
-    if (filter !== 'unread') return sortedLogs;
-    return sortedLogs.filter(log => log.id && !readIds.has(log.id));
-  }, [sortedLogs, filter, readIds]);
+  useEffect(() => {
+    const handler = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) onClose(); };
+    const esc = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', esc); };
+  }, [onClose]);
 
-  const unreadCount = useMemo(
-    () => sortedLogs.filter(log => log.id && !readIds.has(log.id)).length,
-    [sortedLogs, readIds]
-  );
+  const loadOrg = useCallback(async () => {
+    setOrg(o => ({ ...o, loading: true }));
+    try {
+      const res = await axios.get(`${API}/api/notifications`, { params: { scope: 'org' }, fresh: true });
+      setOrg({ items: res.data?.data || [], loading: false, loaded: true });
+    } catch (e) {
+      setOrg({ items: [], loading: false, loaded: true });
+    }
+  }, []);
 
-  // Paginated slice for render performance on large histories.
-  const pagedLogs = useMemo(
-    () => filteredLogs.slice(0, visibleCount),
-    [filteredLogs, visibleCount]
-  );
+  useEffect(() => { if (scope === 'org' && !org.loaded) loadOrg(); }, [scope, org.loaded, loadOrg]);
 
+  const source = scope === 'org' ? org.items : items;
+  const isLoading = scope === 'org' ? org.loading : loading;
+
+  // unread per category, for the little count chips
+  const unreadBy = useMemo(() => {
+    const acc = { all: 0 };
+    items.forEach(n => {
+      if (isRead(n)) return;
+      acc.all++;
+      const c = getMeta(n).category;
+      acc[c] = (acc[c] || 0) + 1;
+    });
+    return acc;
+  }, [items, isRead]);
+
+  const filtered = useMemo(() => source.filter(n => {
+    if (scope === 'mine' && cat !== 'all' && getMeta(n).category !== cat) return false;
+    if (scope === 'mine' && onlyUnread && isRead(n)) return false;
+    return true;
+  }), [source, scope, cat, onlyUnread, isRead]);
+
+  const paged = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
   const grouped = useMemo(() => {
     const now = new Date();
     const acc = {};
-    pagedLogs.forEach(log => {
-      const label = getGroupLabel(log.created_time, now);
-      if (!acc[label]) acc[label] = [];
-      acc[label].push(log);
-    });
+    paged.forEach(n => { (acc[getGroupLabel(n.created_time, now)] = acc[getGroupLabel(n.created_time, now)] || []).push(n); });
     return acc;
-  }, [pagedLogs]);
+  }, [paged]);
 
-  const fetchNotifications = useCallback(async (isRefresh = false) => {
-    isRefresh ? setRefreshing(true) : setLoading(true);
-    try {
-      const res = await axios.get(`${API}/api/notifications`);
-      if (res.data.success) setLogs(res.data.data || []);
-    } catch (e) {
-      console.log('Notifications error:', e.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  const open = (n) => {
+    if (scope === 'mine') markRead(n.id);
+    const target = getTargetRoute(n);
+    if (target) { navigate(target); onClose(); }
+  };
 
-  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (panelRef.current && !panelRef.current.contains(e.target)) onClose();
-    };
-    const escHandler = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', escHandler);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', escHandler);
-    };
-  }, [onClose]);
-
-  const markAsRead = useCallback((id) => {
-    if (!id) return;
-    setReadIds(prev => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      persistIds(NOTIF_READ_IDS_KEY, next);
-      return next;
-    });
-  }, []);
-
-  const markAllRead = useCallback(() => {
-    setReadIds(prev => {
-      const next = new Set(prev);
-      filteredLogs.forEach(log => { if (log.id) next.add(log.id); });
-      persistIds(NOTIF_READ_IDS_KEY, next);
-      return next;
-    });
-  }, [filteredLogs]);
-
-  const deleteNotification = useCallback((e, log) => {
-    e.stopPropagation(); // don't trigger navigation on delete click
-    if (!log.id) return;
-    setDismissedIds(prev => {
-      const next = new Set(prev);
-      next.add(log.id);
-      persistIds(NOTIF_DISMISSED_KEY, next);
-      return next;
-    });
-  }, []);
-
-  const clearAll = useCallback(() => {
-    setDismissedIds(prev => {
-      const next = new Set(prev);
-      filteredLogs.forEach(log => { if (log.id) next.add(log.id); });
-      persistIds(NOTIF_DISMISSED_KEY, next);
-      return next;
-    });
-  }, [filteredLogs]);
-
-  const handleNotificationClick = useCallback((log) => {
-    markAsRead(log.id);
-    const target = getTargetRoute(log);
-    if (target) {
-      navigate(target);
-      onClose();
-    }
-  }, [markAsRead, navigate, onClose]);
-
-  const handleLoadMore = useCallback(() => {
-    // Appending items below the fold — no scroll-position correction needed
-    // since nothing above the current viewport shifts.
-    setVisibleCount(prev => prev + PAGE_SIZE);
-  }, []);
-
-  const hasMore = visibleCount < filteredLogs.length;
+  const hasMore = visibleCount < filtered.length;
+  const idsOf = (list) => list.map(n => n.id);
 
   return (
     <div className="notif-panel" ref={panelRef} role="dialog" aria-label="Notifications">
-
       {/* ── Header ── */}
       <div className="notif-header">
         <div className="notif-header-title">
           <h3 className="notif-title">Notifications</h3>
-          {unreadCount > 0 && (
-            <span className="notif-unread-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
-          )}
+          {unreadCount > 0 && <span className="notif-unread-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
         </div>
         <div className="notif-header-actions">
           <button
-            className={`notif-icon-btn ${refreshing ? 'is-spinning' : ''}`}
-            onClick={() => fetchNotifications(true)}
-            title="Refresh"
-            aria-label="Refresh notifications"
-          >
-            <RiRefreshLine size={14} />
-          </button>
-          <button className="notif-icon-btn" onClick={onClose} title="Close" aria-label="Close notifications">
-            <RiCloseLine size={14} />
-          </button>
+            className={`notif-icon-btn ${refreshing || org.loading ? 'is-spinning' : ''}`}
+            onClick={() => (scope === 'org' ? loadOrg() : refresh({ manual: true }))}
+            title="Refresh" aria-label="Refresh notifications"
+          ><RiRefreshLine size={14} /></button>
+          <button className="notif-icon-btn" onClick={onClose} title="Close" aria-label="Close notifications"><RiCloseLine size={14} /></button>
         </div>
       </div>
 
-      {/* ── Filter tabs ── */}
-      <div className="notif-tabs">
-        <button
-          className={`notif-tab ${filter === 'all' ? 'active' : ''}`}
-          onClick={() => setFilter('all')}
-        >
-          All
-        </button>
-        <button
-          className={`notif-tab ${filter === 'unread' ? 'active' : ''}`}
-          onClick={() => setFilter('unread')}
-        >
-          Unread{unreadCount > 0 ? ` (${unreadCount})` : ''}
-        </button>
-      </div>
+      {/* ── Scope (admins) ── */}
+      {isAdmin && (
+        <div className="notif-scope">
+          <button className={scope === 'mine' ? 'active' : ''} onClick={() => setScope('mine')}><RiUser3Line size={13} /> For you</button>
+          <button className={scope === 'org' ? 'active' : ''} onClick={() => setScope('org')}><RiBuilding2Line size={13} /> Organisation</button>
+        </div>
+      )}
+
+      {/* ── Category chips + unread toggle ── */}
+      {scope === 'mine' ? (
+        <div className="notif-cats">
+          <div className="notif-cat-row">
+            {CATEGORIES.map(c => (
+              <button key={c.key} className={`notif-cat ${cat === c.key ? 'active' : ''}`} onClick={() => { setCat(c.key); setVisibleCount(PAGE_SIZE); }}>
+                {c.label}{unreadBy[c.key] > 0 && <span className="notif-cat-count">{unreadBy[c.key]}</span>}
+              </button>
+            ))}
+          </div>
+          <label className="notif-unread-toggle" title="Show only unread">
+            <input type="checkbox" checked={onlyUnread} onChange={e => { setOnlyUnread(e.target.checked); setVisibleCount(PAGE_SIZE); }} />
+            Unread only
+          </label>
+        </div>
+      ) : (
+        <p className="notif-org-note">Everything that happened across the workspace — who did what, and to whom.</p>
+      )}
 
       {/* ── Body ── */}
-      <div className="notif-body" ref={bodyRef}>
-        {loading ? (
-          <SkeletonList />
-        ) : filteredLogs.length === 0 ? (
-          <EmptyState />
+      <div className="notif-body">
+        {isLoading ? <SkeletonList /> : filtered.length === 0 ? (
+          scope === 'org'
+            ? <EmptyState title="No activity yet" sub="Actions taken by anyone in the workspace will appear here." />
+            : <EmptyState title={onlyUnread ? 'No unread notifications' : 'No notifications yet'} sub={onlyUnread ? "You're all caught up." : 'Shares, team changes and alerts will show up here.'} />
         ) : (
           <>
-            {GROUP_ORDER.filter(label => grouped[label]?.length).map(label => (
+            {GROUP_ORDER.filter(l => grouped[l]?.length).map(label => (
               <div key={label} className="notif-group">
                 <div className="notif-group-label">{label}</div>
-
-                {grouped[label].map((log, i) => {
-                  const meta      = getMeta(log);
-                  const priority  = getPriority(log);
-                  const Icon      = meta.icon;
-                  const isUnread  = log.id ? !readIds.has(log.id) : false;
-                  const details   = cleanDetails(log.details);
-                  const who       = byLine(log);
-                  const clickable = !!getTargetRoute(log);
-
+                {grouped[label].map(n => {
+                  const meta = getMeta(n);
+                  const priority = getPriority(n);
+                  const Icon = meta.icon;
+                  const unread = scope === 'mine' && !isRead(n);
+                  const clickable = !!getTargetRoute(n);
                   return (
                     <div
-                      key={log.id || `${label}-${i}`}
-                      className={`notif-item priority-${priority} ${isUnread ? 'unread' : ''}`}
-                      onClick={() => handleNotificationClick(log)}
+                      key={n.id}
+                      className={`notif-item priority-${priority} ${unread ? 'unread' : ''}`}
+                      onClick={() => open(n)} tabIndex={0} role="button"
+                      onKeyDown={(e) => { if (e.key === 'Enter') open(n); }}
                       style={{ cursor: clickable ? 'pointer' : 'default' }}
-                      tabIndex={0}
-                      role="button"
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleNotificationClick(log); }}
                     >
-                      {/* Icon */}
-                      <div className={`notif-icon notif-icon-${priority}`}>
-                        <Icon size={15} />
+                      <div className="notif-lead">
+                        {n.by_name && n.type !== 'audit'
+                          ? <span className="notif-avatar" style={{ background: avatarColor(n.by_name) }}>{initialsOf(n.by_name)}</span>
+                          : <span className={`notif-icon notif-icon-${priority}`}><Icon size={15} /></span>}
+                        {n.by_name && n.type !== 'audit' && <span className={`notif-lead-badge notif-icon-${priority}`}><Icon size={10} /></span>}
                       </div>
 
-                      {/* Content */}
                       <div className="notif-content">
                         <div className="notif-content-top">
-                          <span className={`notif-action ${isUnread ? 'unread' : ''}`}>
-                            {log.action}
-                          </span>
-                          <PriorityDot priority={priority} />
+                          <span className={`notif-action ${unread ? 'unread' : ''}`}>{n.action}</span>
                         </div>
-
-                        {details && <p className="notif-details">{details}</p>}
-
+                        {n.details && <p className="notif-details">{n.details}</p>}
                         <div className="notif-meta-row">
                           <span className="notif-module-badge">{meta.module}</span>
-                          <span className="notif-time">
-                            <RiTimeLine size={11} /> {timeAgo(log.created_time)}
-                          </span>
+                          {n.scope === 'team' && <span className="notif-scope-chip"><RiTeamLine size={11} /> Team</span>}
+                          {n.type === 'audit' && n.by_name && <span className="notif-by-line">{n.by_name}</span>}
+                          <span className="notif-time"><RiTimeLine size={11} /> {formatRelative(n.created_time, '')}</span>
                         </div>
-
-                        {who && <p className="notif-by-line">{who}</p>}
-
-                        {log.urgent && (
-                          <p className="notif-urgent-line">
-                            <RiAlertLine size={12} /> Expires soon
-                          </p>
-                        )}
+                        {n.urgent && <p className="notif-urgent-line"><RiAlertLine size={12} /> Needs attention</p>}
                       </div>
 
-                      {/* Unread dot */}
-                      {isUnread && <div className="notif-unread-dot" />}
+                      {unread && <div className="notif-unread-dot" />}
 
-                      {/* Row actions */}
-                      <div className="notif-row-actions">
-                        {isUnread && (
-                          <button
-                            className="notif-row-action-btn"
-                            onClick={(e) => { e.stopPropagation(); markAsRead(log.id); }}
-                            title="Mark as read"
-                            aria-label="Mark as read"
-                          >
-                            <RiCheckLine size={13} />
+                      {scope === 'mine' && (
+                        <div className="notif-row-actions">
+                          {unread && (
+                            <button className="notif-row-action-btn" onClick={(e) => { e.stopPropagation(); markRead(n.id); }} title="Mark as read" aria-label="Mark as read">
+                              <RiCheckLine size={13} />
+                            </button>
+                          )}
+                          <button className="notif-row-action-btn notif-row-action-danger" onClick={(e) => { e.stopPropagation(); dismiss(n.id); }} title="Dismiss" aria-label="Dismiss notification">
+                            <RiCloseLine size={13} />
                           </button>
-                        )}
-                        <button
-                          className="notif-row-action-btn notif-row-action-danger"
-                          onClick={(e) => deleteNotification(e, log)}
-                          title="Delete notification"
-                          aria-label="Delete notification"
-                        >
-                          <RiCloseLine size={13} />
-                        </button>
-                      </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
             ))}
-
-            {hasMore && (
-              <button className="notif-load-more" onClick={handleLoadMore}>
-                Load older notifications
-              </button>
-            )}
+            {hasMore && <button className="notif-load-more" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>Load older notifications</button>}
           </>
         )}
       </div>
 
       {/* ── Footer ── */}
       <div className="notif-footer notif-footer-multi">
-        {unreadCount > 0 && (
-          <button className="notif-footer-action-btn" onClick={markAllRead} title="Mark all as read">
+        {scope === 'mine' && unreadCount > 0 && (
+          <button className="notif-footer-action-btn" onClick={() => markAllRead(idsOf(items))} title="Mark all as read">
             <RiCheckDoubleLine size={13} /> Mark all read
           </button>
         )}
-        {filteredLogs.length > 0 && (
-          <button className="notif-footer-action-btn" onClick={clearAll} title="Clear all notifications">
-            <RiDeleteBinLine size={13} /> Clear all
+        {scope === 'mine' && filtered.length > 0 && (
+          <button className="notif-footer-action-btn" onClick={() => dismissAll(idsOf(filtered))} title="Clear shown notifications">
+            <RiDeleteBinLine size={13} /> Clear {cat === 'all' && !onlyUnread ? 'all' : 'shown'}
           </button>
         )}
-        <button className="notif-footer-btn" onClick={onClose}>
-          Close
-        </button>
+        <button className="notif-footer-btn" onClick={onClose}>Close</button>
       </div>
     </div>
   );

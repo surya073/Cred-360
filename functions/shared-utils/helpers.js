@@ -22,7 +22,7 @@ function now() {
 }
 
 function logActivity(catalystApp, fields) {
-  catalystApp.datastore().table('ActivityLogs')
+  (catalystApp.__admin || catalystApp).datastore().table('ActivityLogs')
     .insertRow({ ...fields, created_time: now() })
     .catch(e => console.log('ActivityLog error:', e.message));
 }
@@ -102,19 +102,55 @@ async function isExternalUserBlocked(catalystApp, rawEmail) {
   return (rows[0].ExternalUsers || rows[0]).status === 'blocked';
 }
 
+// Notifications live in the `Notification` table: one row PER RECIPIENT, so read state and
+// dismissal are real and per person. Columns: user_id (recipient), type, message (JSON payload),
+// is_read, created_time. A team recipient is expanded to its members here. The actor is never
+// notified about their own action. Returns the user ids that were notified (to ping live).
 async function pushNotification(catalystApp, {
   event_type, recipient_type, recipient_id, ref_id = '',
   ref_name = '', actor_id = '', actor_name = '', details = '', title = ''
 }) {
   try {
-    await catalystApp.datastore().table('NotificationEvents').insertRow({
-      event_type, recipient_type, recipient_id: String(recipient_id),
-      ref_id: String(ref_id), ref_name, actor_id: String(actor_id),
-      actor_name, details, title, created_time: now(),
+    let userIds;
+    if (recipient_type === 'team') {
+      const members = await catalystApp.zcql()
+        .executeZCQLQuery(`SELECT user_id FROM TeamMembers WHERE team_id = '${recipient_id}'`).catch(() => []);
+      userIds = members.map(m => String((m.TeamMembers || m).user_id));
+    } else {
+      userIds = [String(recipient_id)];
+    }
+    const actor = String(actor_id || '');
+    userIds = [...new Set(userIds)].filter(id => id && id !== actor);
+    if (!userIds.length) return [];
+
+    const message = JSON.stringify({
+      title, details, actor_id: actor, actor_name, ref_id: String(ref_id), ref_name,
+      scope: recipient_type === 'team' ? 'team' : 'you',
     });
+    const created = now();
+    await (catalystApp.__admin || catalystApp).datastore().table('Notification').insertRows(
+      userIds.map(user_id => ({ user_id, type: event_type, message, is_read: false, created_time: created }))
+    );
+    return userIds;
   } catch (e) {
     console.log('pushNotification error:', e.message);
+    pushNotification.lastError = e.message;
+    return [];
   }
+}
+
+const displayName = (u) =>
+  `${u?.first_name || ''} ${u?.last_name || ''}`.trim() || u?.email_id || 'Someone';
+
+// Notify a list of recipients ({ type: 'user'|'team', id }) about one event. Returns the user ids
+// to alert live; routes pass them back as `notify_to` so the client can relay a content-free ping.
+async function notify(catalystApp, base, recipients = []) {
+  const ids = new Set();
+  for (const r of recipients) {
+    if (!r || !r.id) continue;
+    (await pushNotification(catalystApp, { ...base, recipient_type: r.type === 'team' ? 'team' : 'user', recipient_id: r.id })).forEach(id => ids.add(id));
+  }
+  return [...ids];
 }
 
 // ── Short-lived user-directory cache ─────────────────────────────────────────
@@ -189,6 +225,8 @@ module.exports = {
   upsertExternalUser,
   isExternalUserBlocked,
   pushNotification,
+  displayName,
+  notify,
   getAllUsersCached,
   getProfileImagesCached,
   getProfileImageRowsCached,
