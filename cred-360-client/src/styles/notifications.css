@@ -7,7 +7,7 @@
 .nav-icon-btn { position: relative; }
 /* sits on the bell's top-right corner, clear of the icon (the button is 34px, the icon 17px) */
 .notif-count {
-  position: absolute; top: -4px; right: -5px; left: auto; z-index: 2; pointer-events: none;
+  position: absolute; top: 0; right: -1px; left: auto; z-index: 2; pointer-events: none;
   min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
   border-radius: 8px; background: var(--danger, #ef4444); color: #fff;
   font-size: 10px; font-weight: 700; line-height: 12px; text-align: center;
