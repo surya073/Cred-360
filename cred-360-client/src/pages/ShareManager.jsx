@@ -78,6 +78,8 @@ const ShareManager = () => {
   const [shares, setShares]     = useState([]);
   const [loading, setLoading]   = useState(true);
   const [revokeId, setRevokeId] = useState(null);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing,  setClearing]  = useState(false);
   const [revoking, setRevoking] = useState(false);
 
   const fetchShares = useCallback(async () => {
@@ -105,6 +107,20 @@ const ShareManager = () => {
   toast.error('Revoke failed: ' + (e.response?.data?.error || e.message));
     }finally {
       setRevoking(false);
+    }
+  };
+
+  const handleClearExpired = async () => {
+    setClearing(true);
+    try {
+      const res = await axios.delete(`${API}/api/shares/expired/mine`);
+      toast.success(`Cleared ${res.data.removed ?? 0} expired share(s)`);
+      setClearOpen(false);
+      fetchShares();
+    } catch(e) {
+      toast.error('Clear failed: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -199,9 +215,16 @@ const ShareManager = () => {
           <h1 className="page-title">Share Manager</h1>
           <p className="page-subtitle">Manage and revoke all your active shares</p>
         </div>
-        <button className="btn btn-secondary" onClick={fetchShares}>
-          <RiRefreshLine size={16} /> 
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {expiredCount > 0 && (
+            <button className="btn btn-danger" onClick={() => setClearOpen(true)}>
+              <RiDeleteBinLine size={16} /> Clear {expiredCount} expired
+            </button>
+          )}
+          <button className="btn btn-secondary" onClick={fetchShares}>
+            <RiRefreshLine size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="stats-grid" style={{ marginBottom: 16 }}>
@@ -259,6 +282,32 @@ const ShareManager = () => {
         emptyIcon={<RiShareLine size={34} />}
         emptyText="No shares created yet"
       />
+
+      {clearOpen && (
+        <div className="modal-overlay" onClick={() => !clearing && setClearOpen(false)}>
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Clear expired shares</h2>
+              <button className="modal-close" onClick={() => setClearOpen(false)} disabled={clearing}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 12 }}>
+                Remove all {expiredCount} expired shares you created?
+              </p>
+              <div className="share-info-box">
+                <RiShieldLine size={14} />
+                Expired shares already grant no access. This only removes the records, including their viewed history.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setClearOpen(false)} disabled={clearing}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleClearExpired} disabled={clearing}>
+                {clearing ? 'Clearing...' : 'Clear expired'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {revokeId && (
         <div className="modal-overlay" onClick={() => setRevokeId(null)}>

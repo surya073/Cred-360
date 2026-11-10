@@ -30,6 +30,7 @@ import './styles/unified.css';
 import './styles/toast.css';
 import './styles/datatable.css';
 import './styles/premium.css';
+import './styles/chat.css';
 
 // Route-level code splitting: each page loads on demand
 const Dashboard = lazy(() => import('./pages/Dashboard'));

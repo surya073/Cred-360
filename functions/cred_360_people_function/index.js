@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 
 const { ROLE_MAP, ROLE_ID_MAP, INVITE_ROLE_ID_MAP, APP_URL } = require('shared-utils/constants');
-const { getCurrentUser, now, logActivity, mapBy, pushNotification, escapeLike, appRole, isAdmin: isAdminUser } = require('shared-utils/helpers');
+const { getCurrentUser, now, logActivity, mapBy, pushNotification, escapeLike, appRole, isAdmin: isAdminUser, getAllUsersCached, getProfileImageRowsCached, invalidateDirectory, selectAll } = require('shared-utils/helpers');
 const { permList, shareIsActive } = require('shared-utils/permissions');
 
 async function getMemberPermissions(catalystApp, teamId, userId) {
@@ -96,6 +96,7 @@ app.put('/api/users/:id/role', async (req, res) => {
       details: `Your role was changed to ${req.body.role}`,
     });
 
+    invalidateDirectory(); // user list changed — drop the cached directory
     res.json({ success: true });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -135,6 +136,7 @@ app.post('/api/users/invite', async (req, res) => {
       password_id: '', details: `Invited ${email} as ${wantedRole}`,
     });
 
+    invalidateDirectory(); // user list changed — drop the cached directory
     res.json({ success: true, message: 'Invitation sent successfully' });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -171,6 +173,7 @@ app.delete('/api/users/:id', async (req, res) => {
       details: `Deleted user ID: ${req.params.id} (removed from ${memberRows.length} team(s))`,
     });
 
+    invalidateDirectory(); // user list changed — drop the cached directory
     res.json({ success: true });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -178,6 +181,22 @@ app.delete('/api/users/:id', async (req, res) => {
 });
 
 // ── TEAMS ─────────────────────────────────────────────────────────────────────
+
+// Shape raw TeamMembers rows for the client (shared by /teams?include=members and /teams/:id/members).
+const enrichMembers = (memberRows, userMap, profileImages) =>
+  memberRows.map(r => r.TeamMembers || r)
+    .filter(member => userMap[String(member.user_id)])
+    .map(member => {
+      const catalystUser = userMap[String(member.user_id)];
+      return {
+        ROWID: member.ROWID, team_id: member.team_id, user_id: member.user_id,
+        role: member.role || 'Member',
+        permissions: (() => { try { return JSON.parse(member.permissions || '{}'); } catch { return {}; } })(),
+        name: `${catalystUser.first_name || ''} ${catalystUser.last_name || ''}`.trim(),
+        email: catalystUser.email_id || '',
+        profile_image: profileImages[String(member.user_id)] || null,
+      };
+    });
 
 app.get('/api/teams', async (req, res) => {
   try {
@@ -193,8 +212,8 @@ app.get('/api/teams', async (req, res) => {
       userRole !== 'Admin'
         ? zcql.executeZCQLQuery(`SELECT team_id FROM TeamMembers WHERE user_id = '${user.user_id}'`)
         : Promise.resolve([]),
-      catalystApp.userManagement().getAllUsers(),
-      zcql.executeZCQLQuery(`SELECT user_id,profile_image FROM Users`).catch(() => []),
+      getAllUsersCached(catalystApp),
+      getProfileImageRowsCached(catalystApp),
     ]);
 
     const userMap = mapBy(allUsers, u => u.user_id);
@@ -219,6 +238,21 @@ app.get('/api/teams', async (req, res) => {
     if (userRole !== 'Admin') {
       const myTeamIds = new Set(memberRows.map(r => String((r.TeamMembers || r).team_id)));
       visibleTeams = allTeams.filter(t => myTeamIds.has(String(t.ROWID)));
+    }
+
+    // ?include=members  -> every visible team's members in this one response, instead of the
+    // client issuing a /teams/:id/members request (and a directory fetch) per team.
+    if (req.query.include === 'members' && visibleTeams.length) {
+      const ids = visibleTeams.map(t => String(t.ROWID)).filter(id => /^\d{1,20}$/.test(id));
+      const memberRowsAll = await selectAll(zcql,
+        `SELECT * FROM TeamMembers WHERE team_id IN (${ids.map(id => `'${id}'`).join(',')}) ORDER BY ROWID`);
+      const byTeam = {};
+      ids.forEach(id => { byTeam[id] = []; });
+      enrichMembers(memberRowsAll, userMap, profileImages).forEach(m => {
+        // hard guard: only ever emit members of teams this user is allowed to see
+        if (byTeam[String(m.team_id)]) byTeam[String(m.team_id)].push(m);
+      });
+      return res.json({ success: true, data: visibleTeams, members: byTeam });
     }
 
     res.json({ success: true, data: visibleTeams });
@@ -331,7 +365,7 @@ app.post('/api/admin/cleanup-orphaned-members', async (req, res) => {
     const zcql = catalystApp.zcql();
     const [memberRows, allUsers] = await Promise.all([
       zcql.executeZCQLQuery(`SELECT * FROM TeamMembers`),
-      catalystApp.userManagement().getAllUsers(),
+      getAllUsersCached(catalystApp),
     ]);
 
     const validUserIds = new Set(allUsers.map(u => String(u.user_id)));
@@ -357,8 +391,8 @@ app.get('/api/teams/:id/members', async (req, res) => {
     const zcql = catalystApp.zcql();
     const [memberRows, allUsers, imgRows] = await Promise.all([
       zcql.executeZCQLQuery(`SELECT * FROM TeamMembers WHERE team_id = '${req.params.id}'`),
-      catalystApp.userManagement().getAllUsers(),
-      zcql.executeZCQLQuery(`SELECT user_id,profile_image FROM Users`).catch(() => []),
+      getAllUsersCached(catalystApp),
+      getProfileImageRowsCached(catalystApp),
     ]);
 
     const userMap = mapBy(allUsers, u => u.user_id);
@@ -368,19 +402,7 @@ app.get('/api/teams/:id/members', async (req, res) => {
       if (u.user_id && u.profile_image) profileImages[String(u.user_id)] = u.profile_image;
     });
 
-    const enriched = memberRows.map(r => r.TeamMembers || r)
-      .filter(member => userMap[String(member.user_id)])
-      .map(member => {
-        const catalystUser = userMap[String(member.user_id)];
-        return {
-          ROWID: member.ROWID, team_id: member.team_id, user_id: member.user_id,
-          role: member.role || 'Member',
-		  permissions: (() => { try { return JSON.parse(member.permissions || '{}'); } catch { return {}; } })(),
-          name: `${catalystUser.first_name || ''} ${catalystUser.last_name || ''}`.trim(),
-          email: catalystUser.email_id || '',
-          profile_image: profileImages[String(member.user_id)] || null,
-        };
-      });
+    const enriched = enrichMembers(memberRows, userMap, profileImages);
 
     res.json({ success: true, data: enriched });
   } catch(e) {
@@ -573,8 +595,8 @@ app.get('/api/teams/:id/shared-passwords', async (req, res) => {
     const pwIds = [...new Set(activeShares.map(s => s.password_id))];
     const [allPwRows, allUsers, imgRows] = await Promise.all([
       zcql.executeZCQLQuery(`SELECT * FROM Passwords WHERE ROWID IN (${pwIds.join(',')})`).catch(() => []),
-      catalystApp.userManagement().getAllUsers(),
-      zcql.executeZCQLQuery(`SELECT user_id,profile_image FROM Users`).catch(() => []),
+      getAllUsersCached(catalystApp),
+      getProfileImageRowsCached(catalystApp),
     ]);
     const pwMap = mapBy(allPwRows.map(r => r.Passwords || r), p => p.ROWID);
     const userMap = mapBy(allUsers, u => u.user_id);
@@ -632,8 +654,8 @@ app.get('/api/teams/:teamId/shared-folders', async (req, res) => {
     const [allFolderRows, allPwRows, allUsers, imgRows] = await Promise.all([
       zcql.executeZCQLQuery(`SELECT * FROM Folders WHERE ROWID IN (${folderIds.join(',')})`).catch(() => []),
       zcql.executeZCQLQuery(`SELECT * FROM Passwords WHERE folder_id IN (${folderIds.join(',')})`).catch(() => []),
-      catalystApp.userManagement().getAllUsers(),
-      zcql.executeZCQLQuery(`SELECT user_id,profile_image FROM Users`).catch(() => []),
+      getAllUsersCached(catalystApp),
+      getProfileImageRowsCached(catalystApp),
     ]);
 
     const folderMap = mapBy(allFolderRows.map(r => r.Folders || r), f => f.ROWID);
@@ -700,7 +722,7 @@ app.get('/api/notifications', async (req, res) => {
       zcql.executeZCQLQuery(`SELECT ROWID, name, expiry_date FROM Passwords WHERE owner_id = '${user.user_id}' AND expiry_date != ''`).catch(() => []),
       zcql.executeZCQLQuery(`SELECT team_id, added_by FROM TeamMembers WHERE user_id = '${user.user_id}'`).catch(() => []),
       zcql.executeZCQLQuery(`SELECT ROWID, name, created_time FROM Teams`).catch(() => []),
-      catalystApp.userManagement().getAllUsers().catch(() => []),
+      getAllUsersCached(catalystApp).catch(() => []),
     ]);
 
     const userMap = mapBy(allUsers, u => u.user_id);

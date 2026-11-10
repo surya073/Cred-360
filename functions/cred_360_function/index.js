@@ -46,7 +46,7 @@ const notifyPasswordStakeholders = async (catalystApp, actor, pwRow, event_type,
 // getAllUsers() is a full directory fetch — memoise it per request so loops don't repeat it.
 const makeUserLookup = (catalystApp) => {
   let p;
-  return () => (p = p || catalystApp.userManagement().getAllUsers().catch(() => []));
+  return () => (p = p || getAllUsersCached(catalystApp).catch(() => []));
 };
 
 // Tell the person who created an external share what happened to it (fire-and-forget).
@@ -58,7 +58,7 @@ const notifyShareOwner = (catalystApp, share, event_type, title, details, refNam
     actor_name: share.shared_with || 'External user', title, details,
   }).catch(() => {});
 };
-const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain, upsertExternalUser, isExternalUserBlocked, pushNotification } = require('shared-utils/helpers');
+const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain, upsertExternalUser, isExternalUserBlocked, pushNotification, getAllUsersCached, getProfileImageRowsCached, invalidateDirectory, selectAll } = require('shared-utils/helpers');
 const { permList, shareIsActive, getUserTeamIds, getDescendantFolderIds, userCanOnPassword, userCanOnFolder, validateExternalShare, checkRateLimit, recordFailedAttempt, clearAttempts } = require('shared-utils/permissions');
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
@@ -172,6 +172,7 @@ app.post('/api/profile/upload', async (req, res) => {
           }),
     ]);
 
+    invalidateDirectory(); // profile image changed
     res.json({ success: true, fileId: newFileId });
   } catch(e) {
     res.status(500).json({ success: false, error: e.message });
@@ -231,15 +232,16 @@ app.get('/api/dashboard', async (req, res) => {
     const isAdmin  = userRole === 'Admin';
 
     const [pwRows, shareRows, teamRows, folderRows, allUsers] = await Promise.allSettled([
-      zcql.executeZCQLQuery(`SELECT * FROM Passwords WHERE owner_id = '${user.user_id}'`),
-      isAdmin
-        ? zcql.executeZCQLQuery(`SELECT * FROM PasswordShares`)
-        : zcql.executeZCQLQuery(`SELECT * FROM PasswordShares WHERE created_by = '${user.user_id}'`),
-      zcql.executeZCQLQuery(`SELECT * FROM Teams`),
-      isAdmin
-        ? zcql.executeZCQLQuery(`SELECT * FROM Folders`)
-        : zcql.executeZCQLQuery(`SELECT * FROM Folders WHERE owner_id = '${user.user_id}'`),
-      catalystApp.userManagement().getAllUsers(),
+      selectAll(zcql, `SELECT * FROM Passwords WHERE owner_id = '${user.user_id}' ORDER BY ROWID`),
+      // Only the columns the dashboard aggregates on; paged so >300 rows are never silently dropped.
+      selectAll(zcql, isAdmin
+        ? `SELECT ROWID, share_type, shared_with, expiry FROM PasswordShares ORDER BY ROWID`
+        : `SELECT ROWID, share_type, shared_with, expiry FROM PasswordShares WHERE created_by = '${user.user_id}' ORDER BY ROWID`),
+      selectAll(zcql, `SELECT ROWID, name FROM Teams ORDER BY ROWID`),
+      selectAll(zcql, isAdmin
+        ? `SELECT ROWID FROM Folders ORDER BY ROWID`
+        : `SELECT ROWID FROM Folders WHERE owner_id = '${user.user_id}' ORDER BY ROWID`),
+      getAllUsersCached(catalystApp),
     ]);
 
     const allPasswords = pwRows.status     === 'fulfilled' ? pwRows.value.map(r => r.Passwords || r)        : [];
@@ -272,10 +274,13 @@ app.get('/api/dashboard', async (req, res) => {
       name: label, Passwords: monthBuckets.get(key),
     }));
 
-    const shareCounts     = { team: 0, user: 0, external: 0 };
+    const shareCounts     = { team: 0, user: 0, external: 0, folder: 0, other: 0 };
     const teamShareCounts = {};
     shares.forEach(s => {
-      if (s.share_type in shareCounts) shareCounts[s.share_type]++;
+      // external_folder shares go to external recipients, so they count as External.
+      const type = s.share_type === 'external_folder' ? 'external' : s.share_type;
+      if (type in shareCounts) shareCounts[type]++;
+      else shareCounts.other++;
       if (s.share_type === 'team') {
         teamShareCounts[s.shared_with] = (teamShareCounts[s.shared_with] || 0) + 1;
       }
@@ -284,6 +289,8 @@ app.get('/api/dashboard', async (req, res) => {
       { name: 'Team shares',     value: shareCounts.team     },
       { name: 'User shares',     value: shareCounts.user     },
       { name: 'External shares', value: shareCounts.external },
+      { name: 'Folder shares',   value: shareCounts.folder   },
+      ...(shareCounts.other ? [{ name: 'Other shares', value: shareCounts.other }] : []),
     ];
 
     let strong = 0, moderate = 0, weak = 0;
@@ -295,8 +302,14 @@ app.get('/api/dashboard', async (req, res) => {
       })
       .slice(0, 6);
 
+    // Decrypt each password exactly once; reused for the recent-passwords payload below.
+    const strengthById = new Map();
+    const plainById    = new Map();
     allPasswords.forEach(p => {
-      const s = checkStrength(decrypt(p.password));
+      const plain = decrypt(p.password);
+      const s     = checkStrength(plain);
+      plainById.set(p.ROWID, plain);
+      strengthById.set(p.ROWID, s);
       if (s === 'strong') strong++;
       else if (s === 'moderate') moderate++;
       else weak++;
@@ -363,7 +376,7 @@ app.get('/api/dashboard', async (req, res) => {
         totalUsers,
         passwordDelta,
       },
-      recentPasswords: recentPasswords.map(p => ({ ...p, password: decrypt(p.password), strength: checkStrength(decrypt(p.password)) })),
+      recentPasswords: recentPasswords.map(p => ({ ...p, password: plainById.get(p.ROWID), strength: strengthById.get(p.ROWID) })),
       monthlyData,
       shareTypeData,
       healthData: { score: healthScore, strong, moderate, weak },
@@ -389,7 +402,7 @@ app.get('/api/categories', async (req, res) => {
       catalystApp.zcql().executeZCQLQuery(
         `SELECT ROWID, name, color, icon, created_time, created_by FROM Categories ORDER BY name ASC`
       ),
-      catalystApp.userManagement().getAllUsers(),
+      getAllUsersCached(catalystApp),
     ]);
 
     const userMap = {};
@@ -663,17 +676,21 @@ app.get('/api/passwords/expiring', async (req, res) => {
     const user = await getCurrentUser(req, catalystApp);
     if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
-    const rows = await catalystApp.zcql().executeZCQLQuery(
-      `SELECT * FROM Passwords WHERE owner_id = '${user.user_id}' AND expiry_date != '' ORDER BY ROWID DESC`
-    );
     const now2 = new Date();
+    // Only rows expiring within the window (or already expired) are fetched; NULL expiry rows never match.
+    const windowDays = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const cutoff = new Date(now2.getTime() + windowDays * 86_400_000)
+      .toISOString().slice(0, 19).replace('T', ' ');
+    const rows = await catalystApp.zcql().executeZCQLQuery(
+      `SELECT * FROM Passwords WHERE owner_id = '${user.user_id}' AND expiry_date < '${cutoff}' ORDER BY expiry_date ASC`
+    );
     const expiring = rows
       .map(r => r.Passwords || r)
+      .filter(p => p.expiry_date)
       .map(p => {
         const expiryDate = new Date(p.expiry_date.replace(' ', 'T') + 'Z');
         return { ...p, password: decrypt(p.password), diffDays: Math.ceil((expiryDate - now2) / 86_400_000), expiryDate: p.expiry_date };
       })
-      .filter(p => p.diffDays <= 30)
       .sort((a, b) => a.diffDays - b.diffDays);
 
     res.json({ success: true, data: expiring });
@@ -990,7 +1007,7 @@ app.get('/api/shares/my', async (req, res) => {
       pwIds.length     ? zcql.executeZCQLQuery(`SELECT ROWID, name, is_active FROM Passwords WHERE ROWID IN (${pwIds.join(',')})`).catch(() => [])   : Promise.resolve([]),
       folderIds.length ? zcql.executeZCQLQuery(`SELECT ROWID, name, is_active FROM Folders WHERE ROWID IN (${folderIds.join(',')})`).catch(() => []) : Promise.resolve([]),
       hasTeamShares    ? zcql.executeZCQLQuery(`SELECT ROWID, name FROM Teams`).catch(() => [])                                                       : Promise.resolve([]),
-      catalystApp.userManagement().getAllUsers().catch(() => []),
+      getAllUsersCached(catalystApp).catch(() => []),
     ]);
 
     const pwMap     = mapBy(allPwRows.map(r => r.Passwords || r),   p => p.ROWID);
@@ -1046,6 +1063,39 @@ app.get('/api/shares/my', async (req, res) => {
   }
 });
 
+// Bulk-clear the caller's OWN expired shares (never other users'). Expired shares already grant
+// no access, so this is housekeeping; one audit entry records how many were removed.
+app.delete('/api/shares/expired/mine', async (req, res) => {
+  try {
+    const catalystApp = catalyst.initialize(req);
+    const user = await getCurrentUser(req, catalystApp);
+    if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+    const zcql = catalystApp.zcql();
+    const rows = await selectAll(
+      zcql,
+      `SELECT ROWID FROM PasswordShares WHERE created_by = '${user.user_id}' AND expiry < '${now()}' ORDER BY ROWID`
+    );
+    const ids = rows.map(r => (r.PasswordShares || r).ROWID);
+
+    const table = catalystApp.datastore().table('PasswordShares');
+    const CHUNK = 200; // Data Store bulk-delete limit per call
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      await table.deleteRows(ids.slice(i, i + CHUNK));
+    }
+
+    if (ids.length) {
+      logActivity(catalystApp, {
+        action: 'Expired shares cleared', user_id: user.user_id, user_email: user.email_id,
+        password_id: '', details: `Removed ${ids.length} expired share${ids.length > 1 ? 's' : ''}`,
+      });
+    }
+    res.json({ success: true, removed: ids.length });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.delete('/api/shares/:id/revoke', async (req, res) => {
   try {
     const catalystApp = catalyst.initialize(req);
@@ -1086,7 +1136,7 @@ app.delete('/api/shares/:id/revoke', async (req, res) => {
 
     let recipientId = shareDetails.shared_with;
     if (!isTeam) {
-      const allUsers = await catalystApp.userManagement().getAllUsers().catch(() => []);
+      const allUsers = await getAllUsersCached(catalystApp).catch(() => []);
       const match = allUsers.find(u => u.email_id === shareDetails.shared_with);
       recipientId = match ? match.user_id : shareDetails.shared_with;
     }
@@ -1520,8 +1570,8 @@ app.get('/api/shares/received', async (req, res) => {
 
     const [pwRows, allUsers, imgRows] = await Promise.all([
       zcql.executeZCQLQuery(`SELECT * FROM Passwords WHERE ROWID IN (${pwIds.join(',')})`).catch(() => []),
-      catalystApp.userManagement().getAllUsers().catch(() => []),
-      zcql.executeZCQLQuery(`SELECT user_id,profile_image FROM Users`).catch(() => []),
+      getAllUsersCached(catalystApp).catch(() => []),
+      getProfileImageRowsCached(catalystApp),
     ]);
     const pwMap = mapBy(pwRows.map(r => r.Passwords || r), p => p.ROWID);
 

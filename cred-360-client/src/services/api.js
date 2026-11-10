@@ -95,9 +95,14 @@ const get = (url, config = {}) => {
   return p.then(toResponse);
 };
 
+// Writes that cannot change anything other pages display (chat traffic, socket pings, read
+// receipts). Without this exemption every chat message wiped the whole GET cache and made
+// unrelated pages refetch.
+const KEEP_CACHE = [/\/teams\/[^/]+\/messages(\/|$)/, /\/api\/ping$/];
+
 const write = (method) => (...args) =>
   axios[method](...args).then((res) => {
-    clearApiCache();
+    if (!KEEP_CACHE.some((re) => re.test(String(args[0])))) clearApiCache();
     return res;
   });
 

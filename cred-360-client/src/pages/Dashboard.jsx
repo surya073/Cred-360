@@ -23,7 +23,7 @@ const COLORS = {
   folders:   '#7c3aed',
   users:     '#0284c7',
 };
-const DONUT_COLORS  = ['#c31b88', '#16a34a', '#efb71f'];
+const DONUT_COLORS  = ['#c31b88', '#16a34a', '#efb71f', '#2563eb', '#64748b'];
 const TEAM_COLORS   = ['#2563eb', '#7c3aed', '#16a34a', '#d97706', '#0284c7'];
 const SEVERITY_STYLE = {
   high:   { color: '#dc2626', bg: 'var(--danger-bg)' },
@@ -290,7 +290,7 @@ const Dashboard = () => {
   const animExp = useCountUp(stats.expiredShares);
 
   const total = (shareTypeData || []).reduce((a, d) => a + (d.value || 0), 0);
-  const NX_DONUT = ['#8b7cf6', '#d4f56b', '#3fb58a'];
+  const NX_DONUT = ['#8b7cf6', '#d4f56b', '#3fb58a', '#38bdf8', '#94a3b8'];
   const PILLS = [
     { key: 'all',      label: 'All' },
     { key: 'strong',   label: 'Strong' },
@@ -303,7 +303,8 @@ const Dashboard = () => {
   const NxBar = (props) => {
     const { x, y, width, height, index, value } = props;
     const isActive = index === activeIdx;
-    const h = Math.max(height, 74);
+    // Empty months get a short stub so zero never looks like real data; others keep a pill-friendly minimum.
+    const h = value > 0 ? Math.max(height, 44) : 20;
     const yy = y + height - h;
     const r = Math.min(width / 2, h / 2);
     return (

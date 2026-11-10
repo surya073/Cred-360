@@ -10,7 +10,7 @@ const { encrypt, decrypt } = require('shared-utils/encryption');
 const { ROLE_MAP, FROM_EMAIL, APP_URL } = require('shared-utils/constants');
 const emailTpl = require('shared-utils/emailTemplates');
 const { sendTemplated } = emailTpl;
-const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain } = require('shared-utils/helpers');
+const { getCurrentUser, now, logActivity, checkStrength, mapBy, escapeLike, extractDomain, getAllUsersCached } = require('shared-utils/helpers');
 const { permList } = require('shared-utils/permissions');
 
 // ── EXTERNAL USERS ────────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ app.get('/api/external-users', async (req, res) => {
 	  zcql.executeZCQLQuery(
 		`SELECT shared_with, created_by FROM PasswordShares WHERE share_type IN ('external','external_folder')`
 	  ).catch(() => []),
-	  isAdmin ? catalystApp.userManagement().getAllUsers() : Promise.resolve([]),
+	  isAdmin ? getAllUsersCached(catalystApp) : Promise.resolve([]),
 	]);
 
 	const userNameMap = {};
@@ -264,7 +264,7 @@ app.get('/api/external-users/:id/analytics', async (req, res) => {
     const [pwRows, folderRows, allUsers] = await Promise.all([
       pwIds.length     ? zcql.executeZCQLQuery(`SELECT ROWID, name FROM Passwords WHERE ROWID IN (${pwIds.join(',')})`).catch(() => [])     : Promise.resolve([]),
       folderIds.length ? zcql.executeZCQLQuery(`SELECT ROWID, name FROM Folders WHERE ROWID IN (${folderIds.join(',')})`).catch(() => [])   : Promise.resolve([]),
-      isAdmin ? catalystApp.userManagement().getAllUsers() : Promise.resolve([]),
+      isAdmin ? getAllUsersCached(catalystApp) : Promise.resolve([]),
     ]);
     const pwNameMap     = mapBy(pwRows.map(r => r.Passwords || r), p => p.ROWID);
     const folderNameMap = mapBy(folderRows.map(r => r.Folders || r), f => f.ROWID);
@@ -320,7 +320,7 @@ app.get('/api/search', async (req, res) => {
       zcql.executeZCQLQuery(
         `SELECT ROWID, name, description FROM Teams`
       ).catch(e => { console.log('Search teams error:', e.message); return []; }),
-      catalystApp.userManagement().getAllUsers().catch(() => []),
+      getAllUsersCached(catalystApp).catch(() => []),
       zcql.executeZCQLQuery(
         `SELECT ROWID, name, email, company FROM ExternalUsers`
       ).catch(e => { console.log('Search external users error:', e.message); return []; }),
@@ -394,7 +394,7 @@ app.get('/api/users/:id/analytics', async (req, res) => {
     const targetId = req.params.id;
     const zcql = catalystApp.zcql();
 
-    const allUsers  = await catalystApp.userManagement().getAllUsers().catch(() => []);
+    const allUsers  = await getAllUsersCached(catalystApp).catch(() => []);
     const targetUser = allUsers.find(u => String(u.user_id) === String(targetId));
     if (!targetUser) return res.status(404).json({ success: false, error: 'User not found' });
 
@@ -488,7 +488,7 @@ app.post('/api/cron/check-expiry', async (req, res) => {
 
     const [pwRows, allUsers] = await Promise.all([
       zcql.executeZCQLQuery(`SELECT * FROM Passwords WHERE expiry_date != ''`),
-      catalystApp.userManagement().getAllUsers(),
+      getAllUsersCached(catalystApp),
     ]);
 
     const passwords = pwRows.map(r => r.Passwords || r);

@@ -165,25 +165,16 @@ const Teams = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      // One request returns every visible team WITH its members (was: 1 + N requests, N = teams).
       const [teamRes, userRes] = await Promise.all([
-        axios.get(`${API_PEOPLE}/api/teams`),
+        axios.get(`${API_PEOPLE}/api/teams`, { params: { include: 'members' } }),
         axios.get(`${API_PEOPLE}/api/users`),
       ]);
-      if (teamRes.data.success) setTeams(teamRes.data.data || []);
-      if (userRes.data.success) setUsers(userRes.data.data || []);
-
       if (teamRes.data.success) {
-        const memberMap = {};
-        await Promise.all(
-          (teamRes.data.data || []).map(async (team) => {
-            try {
-              const res = await axios.get(`${API_PEOPLE}/api/teams/${team.ROWID}/members`);
-              if (res.data.success) memberMap[team.ROWID] = res.data.data || [];
-            } catch(e) { memberMap[team.ROWID] = []; }
-          })
-        );
-        setMembers(memberMap);
+        setTeams(teamRes.data.data || []);
+        setMembers(teamRes.data.members || {});
       }
+      if (userRes.data.success) setUsers(userRes.data.data || []);
     } catch(e) {
       toast.error('Failed to load teams');
     } finally {
