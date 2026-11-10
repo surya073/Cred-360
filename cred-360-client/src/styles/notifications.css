@@ -5,11 +5,13 @@
 
 /* bell: real unread count instead of a permanent dot */
 .nav-icon-btn { position: relative; }
+/* sits on the bell's top-right corner, clear of the icon (the button is 34px, the icon 17px) */
 .notif-count {
-  position: absolute; top: 1px; right: 0; min-width: 17px; height: 17px; padding: 0 4px;
-  border-radius: 9px; background: var(--danger, #ef4444); color: #fff;
-  font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
-  border: 2px solid var(--bg-primary); box-sizing: content-box;
+  position: absolute; top: -4px; right: -5px; left: auto; z-index: 2; pointer-events: none;
+  min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 8px; background: var(--danger, #ef4444); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 12px; text-align: center;
+  border: 2px solid var(--bg-primary);
   animation: notifPop 0.25s ease-out;
 }
 @keyframes notifPop { from { transform: scale(0.4); } to { transform: scale(1); } }
