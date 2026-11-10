@@ -35,8 +35,16 @@
 }
 [data-theme="dark"] .btn-primary {
   background: linear-gradient(135deg, #3fb58a 0%, #2c8f6c 100%);
-  color: #06201a;
+  color: #ffffff;
   box-shadow: 0 6px 20px rgba(63, 181, 138, 0.3), inset 0 1px 0 rgba(255,255,255,.2);
+}
+/* white label + icon on every primary button, in both themes (faint shadow keeps it legible on the green) */
+.btn-primary,
+.btn-primary:hover,
+.btn-primary:disabled,
+.btn-primary svg {
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.22);
 }
 [data-theme="dark"] .btn-primary:hover {
   background: linear-gradient(135deg, #4cc89c 0%, #34a07b 100%);
